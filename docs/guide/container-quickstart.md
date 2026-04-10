@@ -50,13 +50,11 @@ Then open:
 
 Click **Continue with Mock OAuth** to reach `/spaces`. The shipped compose file
 bootstraps the `default` space at startup so the first browser and CLI session
-both have a ready workspace. For more detail on the explicit browser login
-flow, see [Local Dev Auth Login](local-dev-auth-login.md).
+both have a ready workspace. For the canonical auth-mode comparison and more
+detail on the explicit browser login flow, see
+[Local Development Authentication and Login](local-dev-auth-login.md).
 
-This published quick start intentionally differs from `mise run dev`: it
-defaults to `mock-oauth` so first-time browser evaluators can reach `/spaces`
-with fewer steps, while source development keeps `passkey-totp` as the default
-so contributors exercise the explicit passkey + 2FA flow.
+This published quick start intentionally advertises `mock-oauth`.
 
 ## Next steps
 
@@ -92,8 +90,10 @@ These are the supported release-compose environment variables for the shipped
 
 The shipped compose file keeps `BACKEND_URL=http://backend:8000` fixed inside
 the Compose network, and it pre-wires the signing/bearer settings needed for
-the explicit `mock-oauth` browser login flow. For a broader mode-by-mode
-reference, see [Environment Variable Matrix](env-matrix.md).
+the explicit `mock-oauth` browser login flow. For the canonical auth-mode
+comparison, see
+[Local Development Authentication and Login](local-dev-auth-login.md). For a
+broader environment reference, see [Environment Variable Matrix](env-matrix.md).
 
 ## Version selectors
 

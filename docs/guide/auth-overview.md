@@ -3,9 +3,12 @@
 Use this guide when you want the human-facing explanation of how authentication
 works across the browser, CLI, and backend today.
 
-If you are actively running the local development stack, read
-[Local Development Authentication and Login](local-dev-auth-login.md) next. That
-guide is the step-by-step workflow for `mise run dev`, `/login`, and
+If you need the exact `passkey-totp` vs `mock-oauth` comparison or why source
+and published defaults differ, use
+[Local Development Authentication and Login](local-dev-auth-login.md) as the
+canonical auth-mode reference.
+If you are actively running the local development stack, read that guide next:
+it is the step-by-step workflow for `mise run dev`, `/login`, and
 `ugoite auth login`.
 
 If you need the machine-readable snapshot of the current auth contract, run:
@@ -51,15 +54,13 @@ For CLI troubleshooting, pair `ugoite config current` with `ugoite auth profile`
 the first command tells you which topology is active, and the second tells you
 whether the current mode needs backend credentials or already has one available.
 
-## Local development modes at a glance
+## Local development keeps auth explicit
 
-When you run `mise run dev`, the backend exposes one of two explicit login
-experiences:
-
-| Mode | What it is for | How login happens |
-| --- | --- | --- |
-| `passkey-totp` | Default local development path | You choose a local admin username, prove a current 2FA code, then sign in explicitly in the browser or CLI |
-| `mock-oauth` | Development-only OAuth-style exercise path | You still sign in explicitly after startup, but the backend issues a bearer token through the mock OAuth route instead of username + TOTP |
+Local development still advertises an explicit login mode and waits for the
+browser or CLI to sign in after startup. Use
+[Local Development Authentication and Login](local-dev-auth-login.md) as the
+canonical auth-mode reference for the `passkey-totp` vs `mock-oauth` split, the
+source-vs-published defaults, and the exact `UGOITE_DEV_AUTH_MODE` entry paths.
 
 Both modes are intentionally **explicit login** flows. Startup prepares login
 context; it does not silently inject an already-authenticated session.
@@ -73,10 +74,9 @@ The browser experience is meant to feel like a real application session:
 3. complete that login flow
 4. receive a bearer token only after successful authentication
 
-In `passkey-totp`, the form asks for the same username and current 2FA code that
-match your local development setup.
-
-In `mock-oauth`, the page offers an explicit mock OAuth action instead.
+The login page follows whichever explicit local auth mode the backend
+advertises. Use the canonical local auth guide above for the exact
+`passkey-totp` and `mock-oauth` steps.
 
 After login, the frontend uses the browser session cookie for proxied `/api/*`
 requests. That is why protected pages such as `/spaces` work only after the

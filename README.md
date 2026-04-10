@@ -52,11 +52,10 @@ Local-first applies most directly to Ugoite's storage model and the CLI's
 frontend stack and an explicit login flow, even though the data remains in
 user-controlled local storage.
 
-Auth defaults differ by entry path: `mise run dev` uses `passkey-totp` by
-default so source contributors exercise the explicit local passkey + 2FA flow,
-while the published `docker-compose.release.yaml` quick start uses `mock-oauth`
-by default so browser evaluators can reach `/login` and `/spaces` with fewer
-setup steps.
+Auth defaults differ by entry path. See the
+[canonical auth reference](docs/guide/local-dev-auth-login.md) for the
+`passkey-totp` vs `mock-oauth` comparison, the explicit `/login` mental model,
+and why source and published defaults differ.
 
 ### Which entry path should you choose?
 
@@ -203,7 +202,7 @@ mise run setup
 The setup task also runs `uvx pre-commit install` so local commits use the same
 hook chain as CI by default.
 
-Start development (backend + frontend + docsite — `passkey-totp` is the default local auth mode):
+Start development (backend + frontend + docsite):
 
 ```bash
 mise run dev
@@ -261,9 +260,10 @@ mise run //ugoite-cli:test:clean
 ```
 
 See [Local Dev Auth/Login](docs/guide/local-dev-auth-login.md) for the
-canonical `mise run dev` workflow, including the explicit `/login` browser
-flow, refreshing the local login context, supported auth modes, and the
-`dev:backend`, `dev:frontend`, or `dev:docsite` shortcuts when needed. See
+canonical auth-mode reference plus the step-by-step `mise run dev` workflow,
+including the explicit `/login` browser flow, refreshing the local login
+context, supported auth modes, and the `dev:backend`, `dev:frontend`, or
+`dev:docsite` shortcuts when needed. See
 [CLI Guide](docs/guide/cli.md) for the direct sample-data commands behind
 `mise run seed`.
 
@@ -332,7 +332,8 @@ docker compose -f docker-compose.release.yaml up -d
 Then open `http://localhost:3000/login`, click **Continue with Mock OAuth**,
 and you will land on `/spaces`. The shipped compose file bootstraps the `default` space
 at startup so the first browser and CLI session both have a ready workspace.
-For more background on the explicit browser login flow, see
+For the canonical auth-mode comparison and more background on the explicit
+browser login flow, see
 [Local Dev Auth Login](docs/guide/local-dev-auth-login.md).
 
 The compose file pulls the canonical release image names used by
