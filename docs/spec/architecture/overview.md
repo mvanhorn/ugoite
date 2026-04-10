@@ -71,7 +71,7 @@ The adapter crate depends on `ugoite-minimum` and keeps the heavier integrations
 | `space.rs` | Space CRUD, directory scaffolding |
 | `entry.rs` | Entry CRUD via Iceberg tables, revision history, conflict detection |
 | `form.rs` | Iceberg form schema management |
-| `index.rs` | Structured data extraction, derived indexes |
+| `index.rs` | Structured data extraction plus derived search/index artifacts |
 | `asset.rs` | Binary file storage, deduplication |
 | `link.rs` | Entry-to-entry relationships |
 | `integrity.rs` | HMAC signing, checksum verification |
@@ -99,11 +99,12 @@ API layer providing access to frontend and AI agents:
 
 ### Frontend (TypeScript/SolidStart)
 
-UI layer with NO data logic:
+UI/client layer with client-side state and cache responsibilities, but no
+business-rule or persistence logic:
 
 | Component | Responsibility |
 |-----------|----------------|
-| `lib/*-store.ts` | State management, optimistic updates |
+| `lib/*-store.ts` | Client-side state, local cache, optimistic updates |
 | `lib/*-api.ts` | Feature API clients (REST calls only) |
 | `routes/` | Page components |
 | `components/` | Reusable UI components |
@@ -115,7 +116,7 @@ Ugoite bridges the gap between Markdown freedom and database structure:
 1. **Parse**: Scan Markdown for H2 headers (`## Key`)
 2. **Extract**: Convert headers + content to structured properties
 3. **Validate**: Check against Form definition (if assigned)
-4. **Index**: Update derived indexes for fast queries
+4. **Index**: Update derived search indexes and other query artifacts for fast reads
 
 This enables "Markdown sections as database fields" without complex forms.
 
@@ -149,6 +150,6 @@ Frontend                 Backend              ugoite-core           Storage
 |-----------|----------------|
 | **Local-First** | All data in user-controlled storage; no required cloud services |
 | **Portable** | Iceberg tables (Parquet) + Markdown reconstruction; easy export/import |
-| **AI-Native** | Resource-first MCP integration in `v0.1`; broader agent tooling and workflows planned for `v0.2` |
+| **Resource-First MCP** | `v0.1` ships one read-only MCP resource; broader MCP resources, prompts, and tools are planned for `v0.2` |
 | **Layered** | Clear separation: ugoite-minimum → ugoite-core → {CLI, Backend} → Frontend |
 | **Testable** | Each layer independently testable; memory storage for fast tests |

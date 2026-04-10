@@ -31,12 +31,31 @@ describe("i18n", () => {
 		expect(t("missing.translation.key" as never)).toBe("missing.translation.key");
 	});
 
-	it("restores locale from localStorage on module initialization", async () => {
+	it("restores locale from localStorage during initializeLocale", async () => {
 		localStorage.setItem("ugoite-locale", "ja");
 		vi.resetModules();
 
 		const i18n = await import("./i18n");
 		expect(i18n.locale()).toBe("ja");
+		i18n.initializeLocale();
+		expect(i18n.locale()).toBe("ja");
+		expect(document.documentElement.lang).toBe("ja");
+		expect(document.documentElement.dataset.locale).toBe("ja");
+		expect(i18n.t("themeMenu.language")).toBe("言語");
+	});
+
+	it("REQ-FE-044: initializeLocale refreshes locale from stored preferences", async () => {
+		vi.resetModules();
+		const i18n = await import("./i18n");
+
+		expect(i18n.locale()).toBe("en");
+
+		localStorage.setItem("ugoite-locale", "ja");
+		i18n.initializeLocale();
+
+		expect(i18n.locale()).toBe("ja");
+		expect(document.documentElement.lang).toBe("ja");
+		expect(document.documentElement.dataset.locale).toBe("ja");
 		expect(i18n.t("themeMenu.language")).toBe("言語");
 	});
 

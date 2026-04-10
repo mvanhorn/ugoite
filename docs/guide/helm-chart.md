@@ -26,12 +26,17 @@ the workspace:
 ```bash
 git clone https://github.com/ugoite/ugoite.git
 cd ugoite
+HELM_AUTH_SIGNING_SECRET="$(openssl rand -hex 32)"
+HELM_AUTH_PROXY_TOKEN="$(openssl rand -hex 32)"
 cat > values.local.yaml <<EOF
 image:
   tag: stable
 auth:
+  mode: mock-oauth
   devUserId: dev-local-user
-  proxyToken: release-compose-auth-proxy
+  signingKid: release-compose-local-v1
+  signingSecret: ${HELM_AUTH_SIGNING_SECRET}
+  proxyToken: ${HELM_AUTH_PROXY_TOKEN}
 backend:
   persistence:
     size: 10Gi
@@ -47,7 +52,12 @@ By default the chart uses:
 - `ghcr.io/ugoite/ugoite/backend:${image.tag}`
 - `ghcr.io/ugoite/ugoite/frontend:${image.tag}`
 - a backend volume mounted at `/data`
-- `mock-oauth` dev auth defaults that match the release Compose quick start
+- non-root runtime defaults for backend + frontend containers, including
+  disabled privilege escalation, dropped Linux capabilities, and backend volume
+  write access via `backend.podSecurityContext.fsGroup`
+- `passkey-totp` as the safer shipped auth-mode default until you explicitly opt
+  into local demo login
+- install-specific auth secrets that you supply through `values.local.yaml`
 - a computed `BACKEND_URL` equivalent to `http://backend:8000`, but scoped to
   the generated Kubernetes service name for the current release
 
@@ -66,7 +76,7 @@ The example commands above assume the Helm release name is `ugoite`. Then open:
 - Frontend UI login: http://127.0.0.1:3000/login
 - Backend API: http://127.0.0.1:8000
 
-Click **Continue with Mock OAuth** to reach `/spaces`.
+Click **Continue with Local Demo Login** to reach `/spaces`.
 
 ## Key values
 
@@ -81,10 +91,14 @@ Click **Continue with Mock OAuth** to reach `/spaces`.
 | `backend.persistence.size` | `10Gi` | Requested PVC size for the backend storage volume. |
 | `backend.persistence.storageClassName` | empty | Optional storage class override for the backend PVC. |
 | `backend.persistence.existingClaim` | empty | Reuse an existing PVC instead of creating a new one. |
-| `auth.devUserId` | `dev-local-user` | Mock OAuth user id for the shipped login flow. |
-| `auth.proxyToken` | `release-compose-auth-proxy` | Shared token for frontend proxy and backend dev auth wiring (`UGOITE_DEV_AUTH_PROXY_TOKEN`). |
+| `auth.mode` | `passkey-totp` | Shipped auth-mode default. Set it to `mock-oauth` only for an explicit local demo flow. |
+| `auth.devUserId` | empty | Username/user id hint for the explicit login flow you enable. |
+| `backend.podSecurityContext.fsGroup` | `10001` | Keeps the mounted `/data` volume writable for the backend's non-root image user. |
+| `backend.securityContext` | non-root + `allowPrivilegeEscalation: false` + `drop: ["ALL"]` + `RuntimeDefault` seccomp | Baseline hardening defaults for the backend container. |
+| `frontend.securityContext` | non-root + `allowPrivilegeEscalation: false` + `drop: ["ALL"]` + `RuntimeDefault` seccomp | Baseline hardening defaults for the frontend container. |
+| `auth.proxyToken` | empty (required unique value) | Shared token for frontend proxy and backend dev auth wiring (`UGOITE_DEV_AUTH_PROXY_TOKEN`). |
 | `auth.signingKid` | `release-compose-local-v1` | Signing key id for the default bearer-token setup. |
-| `auth.signingSecret` | `release-compose-local-secret` | Signing secret used to mint the default bearer-token secret. |
+| `auth.signingSecret` | empty (required unique value) | Signing secret used to mint the dev bearer-token secret for this install. |
 | `auth.bearerSecrets` | computed from signing values | Override `UGOITE_AUTH_BEARER_SECRETS` directly when needed. |
 | `auth.bearerActiveKids` | `["release-compose-local-v1"]` | Active bearer-token key ids exposed to the backend. |
 | `frontend.backendUrl` | computed | Override the frontend `BACKEND_URL` instead of using the generated backend Service URL. |
@@ -95,7 +109,14 @@ Click **Continue with Mock OAuth** to reach `/spaces`.
 - Publication or automatic cluster deployment is intentionally out of scope for this chart today. The repository keeps the chart in-tree, but it does not yet publish it to an OCI registry or install it from CI.
 - The chart deliberately stays limited to the existing backend + frontend
   topology from `docker-compose.release.yaml`.
+- The example above explicitly opts into loopback-oriented `mock-oauth`; the
+  shipped chart defaults stay on `passkey-totp` until you make that choice.
+- Generate a fresh `auth.signingSecret` and `auth.proxyToken` for every install
+  so exposed clusters do not rely on repository-known development secrets.
 - If your cluster already has a durable claim, set
   `backend.persistence.existingClaim` instead of creating a new one.
+- Override `backend.securityContext`, `backend.podSecurityContext`, or
+  `frontend.securityContext` only when your cluster already provides equivalent
+  non-root/container hardening guardrails.
 - If you need a fixed backend host instead of the computed chart-equivalent
   service URL, set `frontend.backendUrl`.

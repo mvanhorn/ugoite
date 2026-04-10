@@ -1,15 +1,21 @@
 # Storage Migration Guide
 
-Use this guide before you change a space from one storage URI to another.
+Use this guide before you change the saved storage URI metadata for a space.
+If you are still deciding whether to touch those settings at all, start with
+[Space Settings & Storage](space-settings-storage.md) first.
 
 ## What changing the URI does today
 
 Updating a space's `storage_config.uri` changes the saved connector settings for
 that space metadata. It does **not** automatically copy existing entries, assets,
-or derived indexes from the old location to the new one.
+or derived indexes from the old location to the new one, and it does **not**
+reroute new writes away from the backend deployment storage root yet.
 
-That means a storage switch is currently a **manual migration step**, not a
-one-click move.
+Treat the saved URI as migration planning metadata plus connection validation
+until your operators complete the manual migration work.
+
+That means a storage switch is currently **migration planning metadata plus
+manual prep**, not a live location switch.
 
 ## Practical checklist before switching
 
@@ -20,9 +26,10 @@ one-click move.
 2. Validate the destination first with **Test Connection** in Space Settings.
 3. Copy the existing space data with tooling that matches your current storage
    backend.
-4. Update the Storage URI only after you know the new location is reachable.
-5. Verify that the space opens correctly from the new backend before treating the
-   migration as complete.
+4. Update the saved Storage URI only after you know the new location is
+   reachable and you have a manual migration plan.
+5. Record the cutover plan explicitly; current backend writes stay on the
+   existing deployment storage root until per-space routing support lands.
 
 ## Local vs object-storage trade-offs
 
@@ -41,7 +48,7 @@ one-click move.
 ## Recommended safety checks
 
 - Keep a backup of the old location until you have verified the new one.
-- Treat URI changes as topology changes, not cosmetic edits.
+- Treat URI changes as migration intent, not proof that active writes moved.
 - Document which environment owns the new credentials and access policy.
 
 ## Related references

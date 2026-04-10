@@ -10,6 +10,8 @@ export type NavSection = {
 	title: string;
 	overviewHref: string;
 	items: NavItem[];
+	/** When true, the submenu shows all items instead of capping at 5. */
+	expandAll?: boolean;
 };
 
 export const topLinks: NavItem[] = [
@@ -24,6 +26,7 @@ export const navSections: NavSection[] = [
 	{
 		title: "Getting Started",
 		overviewHref: "/getting-started",
+		expandAll: true,
 		items: [
 			{ title: "Overview", href: "/getting-started" },
 			{
@@ -35,8 +38,47 @@ export const navSections: NavSection[] = [
 				href: "/docs/guide/container-quickstart",
 			},
 			{ title: "Run from source", href: "/docs/guide/local-dev-auth-login" },
+			{ title: "Browser Walkthrough", href: "/docs/guide/browser-first-entry" },
 			{ title: "CLI Guide", href: "/docs/guide/cli" },
 			{ title: "Auth Overview", href: "/docs/guide/auth-overview" },
+			{
+				title: "Operations & Troubleshooting",
+				href: "/docs/guide/operations",
+				items: [
+					{
+						title: "Backend Healthcheck",
+						href: "/docs/guide/backend-healthcheck",
+					},
+					{
+						title: "Environment Matrix",
+						href: "/docs/guide/env-matrix",
+					},
+					{
+						title: "Helm Chart",
+						href: "/docs/guide/helm-chart",
+					},
+					{
+						title: "Log Redaction",
+						href: "/docs/guide/log-redaction",
+					},
+					{
+						title: "Space Settings & Storage",
+						href: "/docs/guide/space-settings-storage",
+					},
+					{
+						title: "Storage Cleanup",
+						href: "/docs/guide/storage-cleanup",
+					},
+					{
+						title: "Storage Migration",
+						href: "/docs/guide/storage-migration",
+					},
+					{
+						title: "Unauthorized Spaces Troubleshooting",
+						href: "/docs/guide/troubleshooting-unauthorized-spaces",
+					},
+				],
+			},
 		],
 	},
 	{
@@ -48,6 +90,7 @@ export const navSections: NavSection[] = [
 			{ title: "UI Pages", href: "/app/frontend/pages", items: [] },
 			{ title: "API & Storage", href: "/app/api-storage" },
 			{ title: "CLI", href: "/app/cli" },
+			{ title: "MCP", href: "/app/mcp" },
 			{ title: "CLI Commands", href: "/app/cli/commands" },
 			{ title: "Data Model", href: "/app/api-storage/data-model" },
 			{ title: "API Catalog", href: "/app/api-storage/apis" },

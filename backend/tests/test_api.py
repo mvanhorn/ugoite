@@ -73,6 +73,23 @@ def test_create_space(test_client: TestClient, temp_space_root: Path) -> None:
     assert (ws_path / "meta.json").exists()
 
 
+def test_create_space_req_sto_002_bootstraps_starter_entry_form(
+    test_client: TestClient,
+    temp_space_root: Path,
+) -> None:
+    """REQ-STO-002: create space bootstraps starter entry authoring assets."""
+    response = test_client.post("/spaces", json={"name": "starter-ws"})
+    assert response.status_code == 201
+
+    ws_path = temp_space_root / "spaces" / "starter-ws"
+    settings = json.loads((ws_path / "settings.json").read_text())
+    assert settings["default_form"] == "Entry"
+
+    forms_response = test_client.get("/spaces/starter-ws/forms")
+    assert forms_response.status_code == 200
+    assert {item["name"] for item in forms_response.json()} == {"Entry"}
+
+
 def test_health_endpoint(test_client: TestClient) -> None:
     """REQ-OPS-001: health endpoint returns service readiness."""
     response = test_client.get("/health")
@@ -84,7 +101,7 @@ def test_create_space_rejects_invalid_name(test_client: TestClient) -> None:
     """REQ-API-001: create space rejects names violating identifier rules."""
     response = test_client.post("/spaces", json={"name": "invalid space"})
     assert response.status_code == 400
-    assert "Invalid space_id" in response.json()["detail"]
+    assert response.json()["detail"] == "Invalid space_id"
 
 
 def test_create_space_req_api_001_requires_admin_space_admin(
@@ -169,6 +186,25 @@ def test_create_space_conflict(
     assert "already exists" in response.json()["detail"]
 
 
+def test_create_space_req_api_001_sanitizes_corrupt_skeleton_conflict_detail(
+    test_client: TestClient,
+    temp_space_root: Path,
+) -> None:
+    """REQ-API-001: create space conflict hides raw storage details."""
+    broken_space_root = temp_space_root / "spaces" / "bad"
+    broken_space_root.mkdir(parents=True)
+    (broken_space_root / "forms").write_text("not-a-directory")
+
+    response = test_client.post("/spaces", json={"name": "bad"})
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Space already exists: bad"
+    lowered = response.json()["detail"].lower()
+    assert "service:" not in lowered
+    assert "path:" not in lowered
+    assert "os error" not in lowered
+
+
 def test_list_spaces(
     test_client: TestClient,
     temp_space_root: Path,
@@ -198,6 +234,31 @@ def test_list_spaces_req_api_001_admin_sees_admin_space(
     assert response.status_code == 200
     space_ids = [s["id"] for s in response.json()]
     assert ugoite_core.admin_space_id() in space_ids
+
+
+def test_list_spaces_req_api_001_flags_reserved_admin_space_and_keeps_default_first(
+    test_client: TestClient,
+    temp_space_root: Path,
+) -> None:
+    """REQ-API-001: /spaces flags reserved admin-space and keeps it behind default."""
+    default_response = test_client.post("/spaces", json={"name": "default"})
+    assert default_response.status_code == 201
+    workspace_response = test_client.post("/spaces", json={"name": "workspace-a"})
+    assert workspace_response.status_code == 201
+
+    response = test_client.get("/spaces")
+
+    assert response.status_code == 200
+    spaces = response.json()
+    assert [space["id"] for space in spaces] == [
+        "default",
+        "workspace-a",
+        ugoite_core.admin_space_id(),
+    ]
+    flags = {space["id"]: space["is_admin_space"] for space in spaces}
+    assert flags["default"] is False
+    assert flags["workspace-a"] is False
+    assert flags[ugoite_core.admin_space_id()] is True
 
 
 def test_list_spaces_req_api_001_non_admin_cannot_see_admin_space(
@@ -357,6 +418,7 @@ def test_get_space_not_found(
     """Test getting a non-existent space."""
     response = test_client.get("/spaces/nonexistent")
     assert response.status_code == 404
+    assert response.json()["detail"] == "Space not found: nonexistent"
 
 
 def test_create_entry(test_client: TestClient, temp_space_root: Path) -> None:
@@ -366,7 +428,7 @@ def test_create_entry(test_client: TestClient, temp_space_root: Path) -> None:
     _create_form(test_client, "test-ws")
 
     entry_payload = {
-        "content": "---\nform: Entry\n---\n# My Entry\n\n## Body\nSome content",
+        "markdown": "---\nform: Entry\n---\n# My Entry\n\n## Body\nSome content",
     }
 
     response = test_client.post("/spaces/test-ws/entries", json=entry_payload)
@@ -379,6 +441,7 @@ def test_create_entry(test_client: TestClient, temp_space_root: Path) -> None:
     # Verify retrieval
     get_response = test_client.get(f"/spaces/test-ws/entries/{entry_id}")
     assert get_response.status_code == 200
+    assert get_response.json()["markdown"] == entry_payload["markdown"]
 
 
 def test_create_entry_conflict(
@@ -526,7 +589,7 @@ def test_get_entry(
     data = response.json()
     assert data["id"] == "test-entry"
     assert data["title"] == "Test Entry"
-    # Entry: get_entry returns "content" field (not "markdown")
+    assert "# Test Entry" in data["markdown"]
     assert "# Test Entry" in data["content"]
 
 
@@ -586,7 +649,7 @@ Original body""",
     get_response = test_client.get("/spaces/test-ws/entries/test-entry")
     updated_entry = get_response.json()
     assert updated_entry["title"] == "Updated Title"
-    # Entry: get_entry returns "content" field (not "markdown")
+    assert "New content" in updated_entry["markdown"]
     assert "New content" in updated_entry["content"]
 
 
@@ -941,12 +1004,12 @@ def test_sql_session_stream_uses_incremental_row_paging(
     async def _paged_rows(
         _config: dict[str, str],
         _space_id: str,
+        _identity: object,
         _session_id: str,
-        offset: int,
-        _limit: int,
+        page: ugoite_core.SqlSessionPageInput,
     ) -> dict[str, object]:
-        call_offsets.append(offset)
-        if offset == 0:
+        call_offsets.append(page.offset)
+        if page.offset == 0:
             return {
                 "rows": [
                     {"id": "entry-1", "title": "Alpha"},
@@ -956,12 +1019,7 @@ def test_sql_session_stream_uses_incremental_row_paging(
             }
         return {"rows": [], "total_count": 2}
 
-    async def _rows_all(*_args: object, **_kwargs: object) -> list[dict[str, object]]:
-        msg = "rows_all must not be called"
-        raise AssertionError(msg)
-
-    monkeypatch.setattr(ugoite_core, "get_sql_session_rows", _paged_rows)
-    monkeypatch.setattr(ugoite_core, "get_sql_session_rows_all", _rows_all)
+    monkeypatch.setattr(ugoite_core, "get_sql_session_rows_for_identity", _paged_rows)
 
     response = test_client.get("/spaces/test-ws/sql-sessions/session-1/stream")
     assert response.status_code == 200
@@ -1039,6 +1097,68 @@ def test_upload_asset_and_link_to_entry(
     assert get_res.status_code == 200
     content = get_res.json()
     assert any(a["id"] == asset["id"] for a in content.get("assets", []))
+
+
+def test_upload_asset_strips_traversal_segments_from_filename(
+    test_client: TestClient,
+    temp_space_root: Path,
+) -> None:
+    """REQ-ENTRY-008: asset upload normalizes traversal-like filenames."""
+    test_client.post("/spaces", json={"name": "source-ws"})
+    test_client.post("/spaces", json={"name": "victim-ws"})
+
+    victim_meta_path = temp_space_root / "spaces" / "victim-ws" / "meta.json"
+    victim_meta_before = victim_meta_path.read_text(encoding="utf-8")
+
+    response = test_client.post(
+        "/spaces/source-ws/assets",
+        files={
+            "file": (
+                "../../../../victim-ws/meta.json",
+                io.BytesIO(b"safe asset"),
+                "text/plain",
+            ),
+        },
+    )
+    assert response.status_code == 201
+
+    asset = response.json()
+    assert asset["name"] == "meta.json"
+    assert asset["path"].startswith("assets/")
+    assert ".." not in asset["path"]
+    assert "/" not in asset["path"][len("assets/") :]
+    assert (temp_space_root / "spaces" / "source-ws" / asset["path"]).exists()
+    assert victim_meta_path.read_text(encoding="utf-8") == victim_meta_before
+
+
+def test_upload_asset_req_asset_001_normalizes_markdown_heading_filename(
+    test_client: TestClient,
+) -> None:
+    """REQ-ASSET-001: asset upload normalizes metadata-spoofing filenames."""
+    test_client.post("/spaces", json={"name": "test-ws"})
+
+    response = test_client.post(
+        "/spaces/test-ws/assets",
+        files={
+            "file": (
+                "## uploaded_at.txt",
+                io.BytesIO(b"hello"),
+                "text/plain",
+            ),
+        },
+    )
+    assert response.status_code == 201
+
+    asset = response.json()
+    assert asset["name"] == "uploaded_at.txt"
+    assert asset["path"] == f"assets/{asset['id']}_uploaded_at.txt"
+
+    entry_response = test_client.get(f"/spaces/test-ws/entries/{asset['id']}")
+    assert entry_response.status_code == 200
+    content = entry_response.json()["content"]
+    assert "## name\nuploaded_at.txt" in content
+    assert f"## link\nugoite://asset/{asset['id']}" in content
+    assert "## name\n## uploaded_at.txt" not in content
 
 
 def test_delete_asset_referenced_fails(
@@ -1124,6 +1244,65 @@ def test_search_rejects_oversized_query(
     assert "Query too long" in search_res.json()["detail"]
 
 
+def test_entry_options_req_fe_065_returns_bounded_form_scoped_matches(
+    test_client: TestClient,
+    temp_space_root: Path,
+) -> None:
+    # REQ-FE-065: row_reference picker options stay form-scoped,
+    # query-aware, and bounded.
+    """REQ-FE-065: row_reference picker options stay form-scoped and bounded."""
+    test_client.post("/spaces", json={"name": "test-ws"})
+    _create_form(
+        test_client,
+        "test-ws",
+        "Project",
+        {"Summary": {"type": "string", "required": False}},
+    )
+    for entry_id, title in [
+        ("project-alpha", "Alpha Project"),
+        ("project-beta", "Beta Project"),
+        ("project-gamma", "Gamma Project"),
+    ]:
+        response = test_client.post(
+            "/spaces/test-ws/entries",
+            json={
+                "id": entry_id,
+                "markdown": (
+                    f"---\nform: Project\n---\n# {title}\n\n## Summary\nReference"
+                ),
+            },
+        )
+        assert response.status_code == 201
+    _create_form(
+        test_client,
+        "test-ws",
+        "Task",
+        {"Summary": {"type": "string", "required": False}},
+    )
+    task_response = test_client.post(
+        "/spaces/test-ws/entries",
+        json={
+            "id": "task-alpha",
+            "markdown": "---\nform: Task\n---\n# Alpha Task\n\n## Summary\nOther form",
+        },
+    )
+    assert task_response.status_code == 201
+
+    options_res = test_client.get(
+        "/spaces/test-ws/entries/options",
+        params={"form": "Project", "q": "alpha", "limit": 1},
+    )
+
+    assert options_res.status_code == 200
+    assert options_res.json() == [
+        {
+            "id": "project-alpha",
+            "title": "Alpha Project",
+            "form": "Project",
+        },
+    ]
+
+
 def test_update_space_storage_connector(
     test_client: TestClient,
     temp_space_root: Path,
@@ -1203,6 +1382,20 @@ def test_middleware_headers_req_sec_002_ignores_untrusted_forwarded_https(
     """REQ-SEC-002: untrusted forwarded proto headers must not enable HSTS."""
     monkeypatch.delenv("UGOITE_TRUST_PROXY_HEADERS", raising=False)
     response = test_client.get("/", headers={"x-forwarded-proto": "https"})
+    assert "Strict-Transport-Security" not in response.headers
+
+
+def test_middleware_headers_req_sec_002_ignores_spoofed_remote_forwarded_https(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """REQ-SEC-002: remote clients cannot spoof HTTPS with X-Forwarded-Proto alone."""
+    monkeypatch.setenv("UGOITE_TRUST_PROXY_HEADERS", "true")
+    monkeypatch.setenv("UGOITE_ALLOW_REMOTE", "true")
+    client = TestClient(app, client=("198.51.100.20", 50000))
+
+    response = client.get("/", headers={"x-forwarded-proto": "https"})
+
+    assert response.status_code == 200
     assert "Strict-Transport-Security" not in response.headers
 
 
@@ -1434,6 +1627,20 @@ def test_middleware_blocks_remote_clients_when_proxy_headers_trusted(
     assert "X-Ugoite-Signature" in response.headers
 
 
+def test_middleware_blocks_spoofed_loopback_forwarded_for_when_proxy_headers_trusted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """REQ-SEC-001: spoofed loopback X-Forwarded-For must not bypass remote blocking."""
+    monkeypatch.setenv("UGOITE_TRUST_PROXY_HEADERS", "true")
+    client = TestClient(app, client=("198.51.100.20", 50000))
+
+    response = client.get("/", headers={"x-forwarded-for": "127.0.0.1"})
+
+    assert response.status_code == 403
+    assert "Remote access is disabled" in response.json()["detail"]
+    assert "X-Ugoite-Signature" in response.headers
+
+
 def test_get_form_types(test_client: TestClient, temp_space_root: Path) -> None:
     """Test getting available form column types (REQ-FORM-001)."""
     # Create space to ensure path is valid
@@ -1612,6 +1819,72 @@ def test_middleware_403_non_json_body_handled(
         result = asyncio.run(security_middleware(mock_request, _call_next))
     # Should not raise; 403 with non-JSON body is handled
     assert result.status_code == 403
+
+
+def test_middleware_req_sec_002_preserves_error_response_when_signing_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """REQ-SEC-002: signing failures preserve the original error response."""
+    monkeypatch.setenv("UGOITE_ROOT", str(tmp_path))
+
+    mock_request = MagicMock()
+    mock_request.client.host = "127.0.0.1"
+    mock_request.url.path = "/spaces"
+    mock_request.method = "POST"
+    mock_request.headers = {}
+
+    original_body = b'{"detail":"operator-visible problem"}'
+    original_response = Response(
+        content=original_body,
+        media_type="application/json",
+        status_code=500,
+    )
+
+    async def _call_next(_req: object) -> Response:
+        return original_response
+
+    def _authenticate(_request: object) -> MagicMock:
+        return MagicMock(user_id="operator")
+
+    message = "corrupt spaces entry"
+
+    async def _failing_sign(
+        _body: bytes,
+        _root: object,
+        _space_id: str = "default",
+    ) -> tuple[str, str]:
+        raise RuntimeError(message)
+
+    with (
+        caplog.at_level("WARNING"),
+        patch(
+            "app.core.middleware.authenticate_request",
+            _authenticate,
+        ),
+        patch(
+            "app.core.middleware.build_response_signature",
+            _failing_sign,
+        ),
+    ):
+        result = asyncio.run(security_middleware(mock_request, _call_next))
+
+    assert result.status_code == 500
+    body_bytes = bytes(result.body)
+    assert body_bytes == original_body
+    assert json.loads(body_bytes.decode("utf-8")) == {
+        "detail": "operator-visible problem",
+    }
+    assert result.headers["X-Content-Type-Options"] == "nosniff"
+    assert result.headers["X-Frame-Options"] == "DENY"
+    assert result.headers["Content-Length"] == str(len(original_body))
+    assert "X-Ugoite-Key-Id" not in result.headers
+    assert "X-Ugoite-Signature" not in result.headers
+    assert (
+        "Failed to sign response for /spaces in space default: corrupt spaces entry"
+        in caplog.text
+    )
 
 
 def test_middleware_emit_audit_runtime_error_swallowed(
@@ -2600,6 +2873,10 @@ def test_create_space_generic_runtime_error(test_client: TestClient) -> None:
     ):
         response = test_client.post("/spaces", json={"name": "fail-ws"})
     assert response.status_code == 500
+    assert response.json()["detail"] == {
+        "code": "internal_error",
+        "message": "Internal server error",
+    }
 
 
 def test_create_space_generic_exception(test_client: TestClient) -> None:
@@ -2610,6 +2887,10 @@ def test_create_space_generic_exception(test_client: TestClient) -> None:
     ):
         response = test_client.post("/spaces", json={"name": "fail-exc-ws"})
     assert response.status_code == 500
+    assert response.json()["detail"] == {
+        "code": "internal_error",
+        "message": "Internal server error",
+    }
 
 
 def test_get_space_generic_runtime_error(test_client: TestClient) -> None:
@@ -2903,3 +3184,41 @@ def test_search_endpoint_authorization_error(test_client: TestClient) -> None:
     ):
         response = test_client.get("/spaces/search-authz-ws/search?q=test")
     assert response.status_code == 403
+
+
+def test_entry_options_endpoint_authorization_error(
+    test_client: TestClient,
+) -> None:
+    """REQ-SEC-006: entry picker options endpoint returns 403 on auth failure."""
+    test_client.post("/spaces", json={"name": "entry-options-authz-ws"})
+    with patch(
+        "ugoite_core.require_space_action",
+        _amock(
+            side_effect=ugoite_core.AuthorizationError(
+                "forbidden",
+                "no access",
+                "entry_read",
+            ),
+        ),
+    ):
+        response = test_client.get(
+            "/spaces/entry-options-authz-ws/entries/options",
+            params={"form": "Project"},
+        )
+    assert response.status_code == 403
+
+
+def test_entry_options_req_fe_065_generic_exception(
+    test_client: TestClient,
+) -> None:
+    """REQ-FE-065: entry picker options endpoint returns 500 on unexpected errors."""
+    test_client.post("/spaces", json={"name": "entry-options-exc-ws"})
+    with patch(
+        "ugoite_core.list_entry_summaries",
+        _amock(side_effect=RuntimeError("unexpected storage error")),
+    ):
+        response = test_client.get(
+            "/spaces/entry-options-exc-ws/entries/options",
+            params={"form": "Project"},
+        )
+    assert response.status_code == 500

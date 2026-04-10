@@ -3,12 +3,12 @@
 Use this guide when you want the human-facing explanation of how authentication
 works across the browser, CLI, and backend today.
 
-If you need the exact `passkey-totp` vs `mock-oauth` comparison or why source
-and published defaults differ, use
-[Local Development Authentication and Login](local-dev-auth-login.md) as the
-canonical auth-mode reference.
-If you are actively running the local development stack, read that guide next:
-it is the step-by-step workflow for `mise run dev`, `/login`, and
+This guide explains the current auth model. If you need the exact
+`passkey-totp` vs `mock-oauth` comparison or why source and published defaults
+differ, use [Local Development Authentication and Login](local-dev-auth-login.md)
+as the canonical auth-mode reference. If you are actively running the local
+development stack, read that guide next: it is the step-by-step workflow for
+`mise run dev`, `/login`, and
 `ugoite auth login`.
 
 If you need the machine-readable snapshot of the current auth contract, run:
@@ -28,7 +28,8 @@ MCP access. The implemented authentication building blocks are:
 
 - signed or static **bearer tokens** for interactive user sessions
 - **API keys** for service-style access
-- explicit local development login flows for `passkey-totp` and `mock-oauth`
+- explicit local development login flows for `passkey-totp` and the local demo
+  login mode (`mock-oauth`)
 
 Some security specifications also describe future passkey/WebAuthn directions.
 Treat those as planned work unless a guide explicitly tells you they are already
@@ -38,7 +39,7 @@ implemented.
 
 | Surface | What you normally do | Token or credential shape |
 | --- | --- | --- |
-| Browser frontend | Sign in on `/login` after the backend advertises the active dev auth mode | Bearer token stored in the browser session context for `/api/*` requests |
+| Browser frontend | Sign in on `/login` after the backend advertises the active dev auth mode | HttpOnly browser session cookie used by the frontend proxy for `/api/*` requests |
 | CLI in `backend` / `api` mode | Run `ugoite auth login` or provide an API key / bearer token env var | Bearer token or API key |
 | Backend REST / MCP clients | Send `Authorization: Bearer ...` or configured API keys | Bearer token or API key |
 | CLI in `core` mode | No backend auth flow because the CLI talks to local storage directly | No backend credential required |
@@ -77,10 +78,18 @@ The browser experience is meant to feel like a real application session:
 The login page follows whichever explicit local auth mode the backend
 advertises. Use the canonical local auth guide above for the exact
 `passkey-totp` and `mock-oauth` steps.
+In `passkey-totp`, the form asks for the same username and current 2FA code that
+match your local development setup. In `mock-oauth`, the page offers an
+explicit local demo login action instead.
 
-After login, the frontend uses the browser session cookie for proxied `/api/*`
-requests. That is why protected pages such as `/spaces` work only after the
-login step succeeds.
+After login, the frontend proxy stores the bearer token in an HttpOnly browser
+session cookie for proxied `/api/*` requests. Frontend JavaScript does not read
+the raw token directly. That is why protected pages such as `/spaces` work only
+after the login step succeeds.
+
+Once `/spaces` loads, continue to
+[Browser Walkthrough: First Space, Form, and Entry](browser-first-entry.md) for
+the exact newcomer path from login to the first useful space content.
 
 ## CLI login in plain language
 
@@ -98,8 +107,12 @@ ugoite auth login --username dev-local-user --totp-code 123456
 ugoite auth login --mock-oauth
 ```
 
-The command prints shell exports such as `UGOITE_AUTH_BEARER_TOKEN=...` so you
-can apply the authenticated token to your current shell session.
+The command saves a CLI session under the ugoite config home so later `ugoite`
+commands stay authenticated without `eval`, and it also prints shell-ready
+environment commands for the current shell session. By default it emits POSIX
+`export` / `unset` syntax; pass `--shell fish` or `--shell powershell` when you
+want `source` / `Invoke-Expression` friendly output instead. The same flag also
+works with `ugoite auth token-clear` and `ugoite auth logout`.
 
 If the CLI is still in `core` mode, `ugoite auth login` correctly refuses to
 run because there is no backend auth exchange in that topology.
@@ -120,6 +133,10 @@ keys."
 
 ## Where to go next
 
+- Need the operator lifecycle for automation keys? Read
+  [Service Account Operations](service-accounts.md).
+- Need the concrete post-login browser path? Read
+  [Browser Walkthrough: First Space, Form, and Entry](browser-first-entry.md).
 - Need the exact local login steps? Read
   [Local Development Authentication and Login](local-dev-auth-login.md).
 - Need CLI usage details? Read [CLI Guide](cli.md).

@@ -1,10 +1,11 @@
-# SQL Sessions & Materialized Views
+# SQL Sessions & Materialized View Metadata
 
 **Updated**: 2026-02
 
-This document defines how Ugoite manages SQL execution without persisting
-large result sets. The design is **stateless except for OpenDAL storage** and
-avoids RDBs, external job queues, or NFS-based shared disks.
+This document defines how Ugoite manages SQL execution metadata and current
+materialized-view placeholders without persisting large result sets. The design
+is **stateless except for OpenDAL storage** and avoids RDBs, external job
+queues, or NFS-based shared disks.
 
 ## Constraints
 
@@ -14,7 +15,7 @@ avoids RDBs, external job queues, or NFS-based shared disks.
 - **Short-lived sessions** (target: ~10 minutes).
 - **Multiple API servers** may serve the same session concurrently.
 
-## Materialized Views
+## Materialized View Metadata (Current Placeholder State)
 
 When a saved SQL is created (`create_sql`), a corresponding **materialized view
 metadata record** MUST be created under:
@@ -72,7 +73,8 @@ spaces/{space_id}/sql_sessions/{session_id}/meta.json
 ```
 
 Sessions do **not** store result rows. Every query for rows/count re-runs the SQL
-against the current entries tables; the `view.snapshot_id` field is a logical
+against the current entries tables after restricting those tables to the current
+caller's readable Forms and entries; the `view.snapshot_id` field is a logical
 marker reserved for future materialized view support.
 
 ### Session Metadata Schema (Recommended)
@@ -110,8 +112,8 @@ marker reserved for future materialized view support.
 ### Paging & Count
 
 - **Rows**: `offset`/`limit` is applied to the re-executed query against the
-  current entries tables.
-- **Count**: computed on-demand with `SELECT COUNT(*)` against the same query.
+  caller-filtered entries tables.
+- **Count**: computed on-demand against the same caller-filtered query scope.
 - **Fast paging**: `order_by` in metadata MUST include a deterministic tie-breaker
   (e.g., `id`) to avoid unstable pages.
 

@@ -43,6 +43,8 @@ Planned endpoint surface (exact payloads may evolve during implementation):
 
 These endpoints expose the current explicit passwordless login flow and stay
 unauthenticated so the browser and CLI can complete sign-in after startup.
+`GET /auth/config` is read-only discovery: it must not create admin-space or
+patch storage as a side effect.
 
 - `GET /auth/config`
 - `POST /auth/login`
@@ -127,6 +129,9 @@ Content-Type: application/json
 
 **Authorization**: caller must be an active admin of the reserved `admin-space`.
 The reserved `admin-space` id itself cannot be created through the public API.
+New spaces bootstrap a user-creatable `Entry` form and set
+`settings.default_form = "Entry"` so clients can open a starter entry flow
+without an extra first-form setup step.
 
 #### Get Space
 ```http
@@ -149,6 +154,11 @@ Content-Type: application/json
 
 **Response**: `200 OK`
 
+Notes:
+- `storage_config` updates saved connector metadata only. The backend continues
+  writing through the deployment storage root until per-space routing or
+  migration support is available.
+
 #### Test Connection
 ```http
 POST /spaces/{id}/test-connection
@@ -165,6 +175,8 @@ Content-Type: application/json
 **Response**: `200 OK` or `400 Bad Request`
 
 Notes:
+- Test Connection validates a proposed connector target only; it does not switch
+  the space's active write location or move existing data.
 - `storage_config.uri` must use a supported connector scheme such as `memory://`, `fs://`, or `s3://`, or be a plain local path starting with `/` or `.`.
 - `storage_config.endpoint`, when provided, must be an `http` or `https` URL and must not target loopback or link-local hosts.
 
@@ -192,13 +204,34 @@ GET /spaces/{space_id}/entries
 ]
 ```
 
+#### List Entry Picker Options
+```http
+GET /spaces/{space_id}/entries/options?form=Project&q=alpha&limit=8
+```
+
+**Response**: `200 OK`
+```json
+[
+  {
+    "id": "project-alpha",
+    "title": "Alpha Project",
+    "form": "Project"
+  }
+]
+```
+
+Notes:
+- `form` scopes the picker to one target form.
+- `q` is optional and filters by human-readable title or stable entry id.
+- `limit` defaults to `8` and is capped at `20` so UI pickers fetch a bounded payload.
+
 #### Create Entry
 ```http
 POST /spaces/{space_id}/entries
 Content-Type: application/json
 
 {
-  "content": "---\nform: Entry\n---\n# My Entry\n\n## Body\nValue"
+  "markdown": "---\nform: Entry\n---\n# My Entry\n\n## Body\nValue"
 }
 ```
 
@@ -206,9 +239,7 @@ Content-Type: application/json
 ```json
 {
   "id": "entry-new-uuid",
-  "title": "My Entry",
-  "revision_id": "rev-0001",
-  "properties": { "Field": "Value" }
+  "revision_id": "rev-0001"
 }
 ```
 
@@ -217,7 +248,9 @@ or extracted properties resolve a `form`, the adapter MUST enforce that Form's
 write ACL before mutating storage; otherwise it falls back to the space-level
 `entry_write` permission.
 
-Create request bodies submit entry Markdown via the `content` field.
+Create request bodies submit entry Markdown via the canonical `markdown` field.
+Create responses return only the generated `id` and `revision_id`; fetch the
+entry afterward if a client needs extracted title or properties.
 
 **Error**: `403 Forbidden` when space or form write authorization fails.
 

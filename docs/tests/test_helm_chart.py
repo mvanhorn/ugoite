@@ -2,6 +2,7 @@
 
 REQ-OPS-028: Repository-owned Helm chart must mirror the published release
 topology.
+REQ-SEC-001: Exposed container packaging must not rely on repository-known auth secrets.
 """
 
 from __future__ import annotations
@@ -24,11 +25,15 @@ CHART_BACKEND_SERVICE_PATH = CHART_DIR / "templates" / "backend-service.yaml"
 CHART_FRONTEND_DEPLOYMENT_PATH = CHART_DIR / "templates" / "frontend-deployment.yaml"
 CHART_FRONTEND_SERVICE_PATH = CHART_DIR / "templates" / "frontend-service.yaml"
 CHART_NOTES_PATH = CHART_DIR / "templates" / "NOTES.txt"
+BACKEND_DOCKERFILE_PATH = REPO_ROOT / "backend" / "Dockerfile"
 HELM_GUIDE_PATH = REPO_ROOT / "docs" / "guide" / "helm-chart.md"
 CONTAINER_GUIDE_PATH = REPO_ROOT / "docs" / "guide" / "container-quickstart.md"
 STACK_SPEC_PATH = REPO_ROOT / "docs" / "spec" / "architecture" / "stack.md"
 README_PATH = REPO_ROOT / "README.md"
 RELEASE_COMPOSE_PATH = REPO_ROOT / "docker-compose.release.yaml"
+HARDENED_RUNTIME_ID = 10001
+DROP_ALL_CAPABILITIES = ["ALL"]
+RUNTIME_DEFAULT_SECCOMP = "RuntimeDefault"
 
 REQUIRED_CHART_PATHS = (
     CHART_METADATA_PATH,
@@ -98,7 +103,7 @@ REQUIRED_HELM_GUIDE_FRAGMENTS = {
     "kubectl -n ugoite port-forward svc/ugoite-frontend 3000:3000",
     "kubectl -n ugoite port-forward svc/ugoite-backend 8000:8000",
     "http://127.0.0.1:3000/login",
-    "Continue with Mock OAuth",
+    "Continue with Local Demo Login",
     "`/data`",
     "UGOITE_DEV_AUTH_PROXY_TOKEN",
     "backend.persistence.existingClaim",
@@ -125,6 +130,31 @@ REQUIRED_STACK_SPEC_FRAGMENTS = {
     "charts/ugoite",
     "backend + frontend",
     "`/data`",
+}
+REQUIRED_BACKEND_DOCKERFILE_HARDENING_FRAGMENTS = {
+    "ARG UGOITE_UID=10001",
+    "ARG UGOITE_GID=10001",
+    'groupadd --system --gid "${UGOITE_GID}" ugoite',
+    'useradd --system --uid "${UGOITE_UID}" --gid "${UGOITE_GID}"',
+    "mkdir -p /data",
+    (
+        "chown -R ugoite:ugoite /app /data /home/ugoite "
+        "/ugoite-core /ugoite-minimum /ugoite-cli"
+    ),
+    "ENV HOME=/home/ugoite",
+    "USER ugoite:ugoite",
+}
+REQUIRED_HELM_HARDENING_GUIDE_FRAGMENTS = {
+    "non-root runtime defaults for backend + frontend containers",
+    "disabled privilege escalation",
+    "dropped Linux capabilities",
+    "`backend.podSecurityContext.fsGroup`",
+    "`backend.securityContext`",
+    "`frontend.securityContext`",
+}
+REQUIRED_STACK_HARDENING_FRAGMENTS = {
+    "non-root/container-hardened",
+    "root-only privileges",
 }
 
 
@@ -233,10 +263,10 @@ def test_docs_req_ops_028_helm_chart_defaults_match_release_topology() -> None:
             "/data",
             "charts/ugoite values.backend.persistence.mountPath",
         ),
-        (str(auth.get("mode")), "mock-oauth", "charts/ugoite values.auth.mode"),
+        (str(auth.get("mode")), "passkey-totp", "charts/ugoite values.auth.mode"),
         (
             str(auth.get("devUserId")),
-            "dev-local-user",
+            "",
             "charts/ugoite values.auth.devUserId",
         ),
         (
@@ -246,14 +276,10 @@ def test_docs_req_ops_028_helm_chart_defaults_match_release_topology() -> None:
         ),
         (
             str(auth.get("signingSecret")),
-            "release-compose-local-secret",
+            "",
             "charts/ugoite values.auth.signingSecret",
         ),
-        (
-            str(auth.get("proxyToken")),
-            "release-compose-auth-proxy",
-            "charts/ugoite values.auth.proxyToken",
-        ),
+        (str(auth.get("proxyToken")), "", "charts/ugoite values.auth.proxyToken"),
     )
     for actual, expected, label in expected_values:
         if actual != expected:
@@ -272,13 +298,25 @@ def test_docs_req_ops_028_helm_chart_defaults_match_release_topology() -> None:
         "ghcr.io/ugoite/ugoite/frontend:${UGOITE_VERSION:?set UGOITE_VERSION}",
         "UGOITE_ROOT=/data",
         "UGOITE_ALLOW_REMOTE=true",
-        "UGOITE_DEV_AUTH_MODE=mock-oauth",
-        "UGOITE_DEV_USER_ID=${UGOITE_DEV_USER_ID:-dev-local-user}",
-        "UGOITE_DEV_SIGNING_KID=release-compose-local-v1",
-        "UGOITE_DEV_SIGNING_SECRET=release-compose-local-secret",
-        "UGOITE_AUTH_BEARER_SECRETS=release-compose-local-v1:release-compose-local-secret",
-        "UGOITE_AUTH_BEARER_ACTIVE_KIDS=release-compose-local-v1",
-        "UGOITE_DEV_AUTH_PROXY_TOKEN=${UGOITE_DEV_AUTH_PROXY_TOKEN:-release-compose-auth-proxy}",
+        "UGOITE_DEV_AUTH_MODE=${UGOITE_DEV_AUTH_MODE:-passkey-totp}",
+        "UGOITE_DEV_USER_ID=${UGOITE_DEV_USER_ID:?set UGOITE_DEV_USER_ID}",
+        "UGOITE_DEV_SIGNING_KID=${UGOITE_DEV_SIGNING_KID:-release-compose-local-v1}",
+        (
+            "UGOITE_DEV_SIGNING_SECRET="
+            "${UGOITE_DEV_SIGNING_SECRET:?set UGOITE_DEV_SIGNING_SECRET}"
+        ),
+        (
+            "UGOITE_AUTH_BEARER_SECRETS="
+            "${UGOITE_AUTH_BEARER_SECRETS:?set UGOITE_AUTH_BEARER_SECRETS}"
+        ),
+        (
+            "UGOITE_AUTH_BEARER_ACTIVE_KIDS="
+            "${UGOITE_AUTH_BEARER_ACTIVE_KIDS:-release-compose-local-v1}"
+        ),
+        (
+            "UGOITE_DEV_AUTH_PROXY_TOKEN="
+            "${UGOITE_DEV_AUTH_PROXY_TOKEN:?set UGOITE_DEV_AUTH_PROXY_TOKEN}"
+        ),
         "BACKEND_URL=http://backend:8000",
     }
     missing_compose_fragments = _missing_fragments(
@@ -336,6 +374,51 @@ def test_docs_req_ops_028_helm_chart_defaults_match_release_topology() -> None:
             _fail(f"{label} missing fragments: {', '.join(missing)}")
 
 
+def test_docs_req_sec_001_helm_chart_requires_unique_auth_secrets() -> None:
+    """REQ-SEC-001: Helm chart installs must require unique dev auth secrets."""
+    secret_text = _read_text(CHART_SECRET_PATH)
+    required_secret_fragments = {
+        (
+            'required "charts/ugoite values.auth.signingSecret '
+            'must be set to a unique secret"'
+        ),
+        (
+            'required "charts/ugoite values.auth.proxyToken '
+            'must be set to a unique token"'
+        ),
+    }
+    missing_secret_fragments = _missing_fragments(
+        secret_text,
+        required_secret_fragments,
+    )
+    if missing_secret_fragments:
+        _fail(
+            (
+                "charts/ugoite/templates/auth-secret.yaml must require unique "
+                "auth secrets: "
+            )
+            + ", ".join(missing_secret_fragments),
+        )
+
+    guide_text = _read_text(HELM_GUIDE_PATH)
+    required_guide_fragments = {
+        'HELM_AUTH_SIGNING_SECRET="$(openssl rand -hex 32)"',
+        'HELM_AUTH_PROXY_TOKEN="$(openssl rand -hex 32)"',
+        "signingSecret: ${HELM_AUTH_SIGNING_SECRET}",
+        "proxyToken: ${HELM_AUTH_PROXY_TOKEN}",
+        "empty (required unique value)",
+    }
+    missing_guide_fragments = _missing_fragments(
+        guide_text,
+        required_guide_fragments,
+    )
+    if missing_guide_fragments:
+        _fail(
+            "docs/guide/helm-chart.md must document unique auth secret setup: "
+            + ", ".join(missing_guide_fragments),
+        )
+
+
 def test_docs_req_ops_028_helm_chart_docs_stay_wired() -> None:
     """REQ-OPS-028: Helm chart docs must stay discoverable and explicit."""
     doc_checks = (
@@ -369,7 +452,7 @@ def test_docs_req_ops_028_helm_chart_docs_stay_wired() -> None:
             {
                 "docker-compose.release.yaml",
                 "http://127.0.0.1:3000/login",
-                "Continue with Mock OAuth",
+                "Continue with Local Demo Login",
                 "port-forward",
             },
             "charts/ugoite/templates/NOTES.txt",
@@ -379,3 +462,167 @@ def test_docs_req_ops_028_helm_chart_docs_stay_wired() -> None:
         missing = _missing_fragments(_read_text(path), fragments)
         if missing:
             _fail(f"{label} missing fragments: {', '.join(missing)}")
+
+
+def test_docs_req_ops_035_backend_image_runs_as_non_root() -> None:
+    """REQ-OPS-035: The backend image must create and run as a non-root user."""
+    missing = _missing_fragments(
+        _read_text(BACKEND_DOCKERFILE_PATH),
+        REQUIRED_BACKEND_DOCKERFILE_HARDENING_FRAGMENTS,
+    )
+    if missing:
+        _fail(f"backend/Dockerfile missing hardening fragments: {', '.join(missing)}")
+
+
+def test_docs_req_ops_035_helm_security_defaults_are_hardened() -> None:
+    """REQ-OPS-035: Helm defaults must keep backend/frontend deployments hardened."""
+    values = _load_yaml_mapping(CHART_VALUES_PATH)
+    backend = _require_mapping(
+        values.get("backend"),
+        label="charts/ugoite values.backend",
+    )
+    frontend = _require_mapping(
+        values.get("frontend"),
+        label="charts/ugoite values.frontend",
+    )
+    backend_pod_security = _require_mapping(
+        backend.get("podSecurityContext"),
+        label="charts/ugoite values.backend.podSecurityContext",
+    )
+    backend_security = _require_mapping(
+        backend.get("securityContext"),
+        label="charts/ugoite values.backend.securityContext",
+    )
+    frontend_security = _require_mapping(
+        frontend.get("securityContext"),
+        label="charts/ugoite values.frontend.securityContext",
+    )
+
+    if backend_pod_security.get("fsGroup") != HARDENED_RUNTIME_ID:
+        _fail(
+            "charts/ugoite values.backend.podSecurityContext.fsGroup must be "
+            f"{HARDENED_RUNTIME_ID}",
+        )
+
+    backend_expectations = (
+        (
+            backend_security.get("runAsNonRoot"),
+            True,
+            "backend.securityContext.runAsNonRoot",
+        ),
+        (
+            backend_security.get("runAsUser"),
+            HARDENED_RUNTIME_ID,
+            "backend.securityContext.runAsUser",
+        ),
+        (
+            backend_security.get("runAsGroup"),
+            HARDENED_RUNTIME_ID,
+            "backend.securityContext.runAsGroup",
+        ),
+        (
+            backend_security.get("allowPrivilegeEscalation"),
+            False,
+            "backend.securityContext.allowPrivilegeEscalation",
+        ),
+        (
+            frontend_security.get("runAsNonRoot"),
+            True,
+            "frontend.securityContext.runAsNonRoot",
+        ),
+        (
+            frontend_security.get("allowPrivilegeEscalation"),
+            False,
+            "frontend.securityContext.allowPrivilegeEscalation",
+        ),
+    )
+    for actual, expected, label in backend_expectations:
+        if actual != expected:
+            _fail(f"charts/ugoite values.{label} must be {expected!r}, got {actual!r}")
+
+    backend_caps = _require_mapping(
+        backend_security.get("capabilities"),
+        label="charts/ugoite values.backend.securityContext.capabilities",
+    )
+    frontend_caps = _require_mapping(
+        frontend_security.get("capabilities"),
+        label="charts/ugoite values.frontend.securityContext.capabilities",
+    )
+    if backend_caps.get("drop") != DROP_ALL_CAPABILITIES:
+        _fail(
+            "charts/ugoite values.backend.securityContext.capabilities.drop "
+            f"must be {DROP_ALL_CAPABILITIES!r}",
+        )
+    if frontend_caps.get("drop") != DROP_ALL_CAPABILITIES:
+        _fail(
+            "charts/ugoite values.frontend.securityContext.capabilities.drop "
+            f"must be {DROP_ALL_CAPABILITIES!r}",
+        )
+
+    backend_seccomp = _require_mapping(
+        backend_security.get("seccompProfile"),
+        label="charts/ugoite values.backend.securityContext.seccompProfile",
+    )
+    frontend_seccomp = _require_mapping(
+        frontend_security.get("seccompProfile"),
+        label="charts/ugoite values.frontend.securityContext.seccompProfile",
+    )
+    if backend_seccomp.get("type") != RUNTIME_DEFAULT_SECCOMP:
+        _fail(
+            "charts/ugoite values.backend.securityContext.seccompProfile.type "
+            f"must be {RUNTIME_DEFAULT_SECCOMP}",
+        )
+    if frontend_seccomp.get("type") != RUNTIME_DEFAULT_SECCOMP:
+        _fail(
+            "charts/ugoite values.frontend.securityContext.seccompProfile.type "
+            f"must be {RUNTIME_DEFAULT_SECCOMP}",
+        )
+
+    template_checks = (
+        (
+            CHART_BACKEND_DEPLOYMENT_PATH,
+            {
+                ".Values.backend.podSecurityContext",
+                ".Values.backend.securityContext",
+                "securityContext:",
+            },
+            "charts/ugoite/templates/backend-deployment.yaml",
+        ),
+        (
+            CHART_FRONTEND_DEPLOYMENT_PATH,
+            {
+                ".Values.frontend.securityContext",
+                "securityContext:",
+            },
+            "charts/ugoite/templates/frontend-deployment.yaml",
+        ),
+    )
+    for path, fragments, label in template_checks:
+        missing = _missing_fragments(_read_text(path), fragments)
+        if missing:
+            _fail(f"{label} missing hardening fragments: {', '.join(missing)}")
+
+
+def test_docs_req_ops_035_hardening_docs_stay_visible() -> None:
+    """REQ-OPS-035: Hardening defaults must stay visible in deployment docs."""
+    doc_checks = (
+        (
+            HELM_GUIDE_PATH,
+            REQUIRED_HELM_HARDENING_GUIDE_FRAGMENTS,
+            "docs/guide/helm-chart.md",
+        ),
+        (
+            STACK_SPEC_PATH,
+            REQUIRED_STACK_HARDENING_FRAGMENTS,
+            "docs/spec/architecture/stack.md",
+        ),
+        (
+            CHART_README_PATH,
+            {"non-root runtime hardening defaults"},
+            "charts/ugoite/README.md",
+        ),
+    )
+    for path, fragments, label in doc_checks:
+        missing = _missing_fragments(_read_text(path), fragments)
+        if missing:
+            _fail(f"{label} missing hardening fragments: {', '.join(missing)}")

@@ -36,7 +36,9 @@ requirements:
       tests:
       - test_docs_req_ops_001_guides_exist
       - test_docs_req_ops_001_shell_blocks_parse
+      - test_docs_req_ops_001_backend_targeted_pytest_path_is_documented
       - test_docs_req_ops_001_backend_python_prereqs_match_metadata_and_stack
+      - test_docs_req_ops_001_source_compose_frontend_stays_loopback_only
       - test_docs_req_ops_001_env_matrix_matches_runtime_usage
       - test_docs_req_ops_001_mise_versions_match_ci_pins
 - set_id: REQCAT-OPS
@@ -245,6 +247,16 @@ requirements:
       - test_entry_create_req_ops_006_help_leads_with_plain_markdown_example
       - test_entry_update_req_ops_006_help_describes_required_inputs
       - test_form_and_search_req_ops_006_help_describes_required_inputs
+    - file: ugoite-cli/tests/test_cli_req_ops_006_coverage.rs
+      tests:
+      - test_cli_req_ops_006_query_help_rejects_removed_flags
+    - file: ugoite-cli/tests/test_cli_req_ops_006_http_helpers.rs
+      tests:
+      - test_cli_req_ops_006_http_helpers_return_json_on_success
+      - test_cli_req_ops_006_http_helpers_surface_error_bodies
+      - test_cli_req_ops_006_http_helpers_apply_auth_headers
+      - test_cli_req_ops_006_http_helpers_apply_dev_auth_proxy_header
+      - test_cli_req_ops_006_http_helpers_surface_dev_auth_proxy_error_bodies
 - set_id: REQCAT-OPS
   source_file: requirements/ops.yaml
   scope: Operational quality, workflow, and automation requirements.
@@ -386,6 +398,10 @@ requirements:
     - file: docs/tests/test_guides.py
       tests:
       - test_docs_req_ops_010_frontend_dev_proxy_readiness_declared
+    vitest:
+    - file: docsite/src/lib/app-api-storage-healthcheck.test.ts
+      tests:
+      - 'REQ-OPS-010: app API & Storage page verifies readiness with the health endpoint first'
 - set_id: REQCAT-OPS
   source_file: requirements/ops.yaml
   scope: Operational quality, workflow, and automation requirements.
@@ -560,13 +576,36 @@ requirements:
 
     login context with owner-only permissions, require a passkey-bound local
 
-    context in addition to the 2FA code during explicit browser/CLI login, and
+    context in addition to the 2FA code during explicit browser/CLI login, keep
 
-    complete an explicit login step before a bearer token is issued. `mock-oauth`
+    `GET /auth/config` read-only so login discovery cannot recreate admin-space
+
+    or other storage state, apply temporary throttling after repeated failed
+
+    `passkey-totp` login attempts so the endpoint cannot be hammered
+
+    indefinitely, and
+
+    complete an explicit login step before a bearer token is issued. Browser
+
+    login MUST terminate through the frontend proxy, which stores the resulting
+
+    bearer token in an HttpOnly session cookie instead of exposing it to
+
+    frontend JavaScript. CLI logins MUST also persist the issued bearer token
+
+    in a CLI-owned session file with owner-only permissions so follow-up CLI
+
+    commands stay authenticated without shell eval, while still allowing shell
+
+    export output for scripting. `mock-oauth`
 
     MAY remain as an explicit development-only OAuth-style login path, but no dev
 
-    mode may pre-inject a bearer token into the running stack. The standard
+    mode may pre-inject a bearer token into the running stack. CLI auth login,
+    token-clear, and logout MUST print shell-aware environment commands so users
+    can apply or clear credentials in POSIX shells, fish, or PowerShell without
+    manual translation. The standard
 
     devcontainer setup MUST include `oathtool` so passkey-totp flows remain
 
@@ -596,14 +635,19 @@ requirements:
     - file: backend/tests/test_dev_auth.py
       tests:
       - test_dev_auth_req_ops_015_config_exposes_passkey_totp_mode
+      - test_dev_auth_req_ops_015_auth_config_remains_read_only
       - test_dev_auth_req_ops_015_passkey_totp_login_issues_signed_token
       - test_dev_auth_req_ops_015_passkey_totp_login_rejects_replayed_code
+      - test_dev_auth_req_ops_015_passkey_login_throttles_repeated_failures
+      - test_dev_auth_req_ops_015_passkey_login_throttles_repeated_context_failures
+      - test_dev_auth_req_ops_015_passkey_login_recovers_after_throttle_window
       - test_dev_auth_req_ops_015_mock_oauth_login_issues_signed_token
       - test_dev_auth_req_ops_015_startup_bootstraps_admin_space
       - test_dev_auth_req_ops_015_passkey_login_rejects_missing_passkey_context
       - test_dev_auth_req_ops_015_passkey_login_rejects_invalid_passkey_context
       - test_dev_auth_req_ops_015_passkey_login_rejects_blank_passkey_context
       - test_dev_auth_req_ops_015_passkey_login_requires_configured_passkey_context
+      - test_dev_auth_req_ops_015_rejects_spoofed_loopback_forwarded_for
       - test_dev_auth_req_ops_015_allows_trusted_proxy_token
       - test_dev_auth_req_ops_015_rejects_invalid_trusted_proxy_token
       - test_dev_auth_req_ops_015_rejects_missing_trusted_proxy_token
@@ -617,12 +661,17 @@ requirements:
     vitest:
     - file: frontend/src/routes/login.test.tsx
       tests:
-      - 'REQ-OPS-015: signs in with passkey-totp and stores a browser auth cookie'
-      - 'REQ-OPS-015: uses explicit mock-oauth browser login without startup auth injection'
+      - 'REQ-OPS-015: signs in with passkey-totp without exposing a readable auth cookie'
+      - 'REQ-OPS-015: uses explicit mock-oauth browser login without exposing a readable auth cookie'
       - 'REQ-OPS-015: visiting login preserves an existing browser auth cookie until re-auth completes'
+      - 'REQ-OPS-015: keeps the /spaces shortcut out of signed-out login screens'
       - 'REQ-OPS-015: shows first-run passkey guidance with the canonical local auth guide'
       - 'REQ-OPS-015: keeps first-run passkey guidance out of mock-oauth login'
       - 'REQ-OPS-015: keeps auth-config recovery guidance compatible with source and published browser flows'
+    - file: frontend/src/routes/api/[...path].test.ts
+      tests:
+      - 'REQ-OPS-015: proxy login stores browser auth in an HttpOnly cookie and redacts the bearer token'
+      - 'REQ-OPS-015: proxy login marks auth cookies Secure when HTTPS is forwarded'
     - file: frontend/src/lib/api.test.ts
       tests:
       - 'REQ-OPS-015: forwards SSR auth headers to local auth requests'
@@ -632,6 +681,12 @@ requirements:
       - 'REQ-OPS-015: uses FRONTEND_URL for the SSR API origin when frontend origin env vars are unset'
       - 'REQ-OPS-015: falls back to the default SSR origin when no frontend origin env is configured'
       - 'REQ-OPS-015: does not derive the SSR API origin from the incoming request'
+    - file: frontend/src/lib/auth-cookie.test.ts
+      tests:
+      - 'REQ-OPS-015: reads auth cookies from browser request headers'
+      - 'REQ-OPS-015: treats missing, blank, and undecodable auth cookies safely'
+      - 'REQ-OPS-015: builds HttpOnly auth cookies with explicit expiry'
+      - 'REQ-OPS-015: omits auth cookie expiry when the browser session should stay transient'
     - file: frontend/src/lib/frontend-origin.test.ts
       tests:
       - 'REQ-OPS-015: falls back to the default frontend test origin when process env is unavailable'
@@ -643,12 +698,12 @@ requirements:
     - file: frontend/src/lib/auth-api.test.ts
       tests:
       - 'REQ-OPS-015: surfaces local auth config and login response errors clearly'
-      - 'REQ-OPS-015: writes and clears browser auth cookies with explicit expiry'
-      - 'REQ-OPS-015: writes and clears browser auth cookies with explicit expiry safely when document is unavailable'
-      - 'REQ-OPS-015: no-ops when cookie descriptors are unavailable'
     - file: frontend/src/routes/spaces/index.test.tsx
       tests:
       - 'REQ-OPS-015: redirects unauthenticated users to the explicit login route'
+    - file: frontend/src/routes/index.test.tsx
+      tests:
+      - 'REQ-OPS-015: public home page points first-time users to /login before /spaces'
     rust:
     - file: ugoite-cli/tests/test_auth.rs
       tests:
@@ -657,13 +712,30 @@ requirements:
       - test_cli_auth_profile_req_ops_015_reports_masked_backend_credentials
       - test_cli_auth_profile_req_ops_015_reports_api_mode_with_api_key
       - test_cli_auth_login_req_ops_015_posts_dev_login_and_prints_export
+      - test_cli_auth_login_req_ops_015_reuses_cached_dev_auth_file_context
+      - test_cli_auth_login_req_ops_015_surfaces_passkey_context_recovery_guidance
       - test_cli_auth_login_req_ops_015_shell_escapes_bearer_token_exports
+      - test_cli_auth_login_req_ops_015_supports_fish_env_output
+      - test_cli_auth_login_req_ops_015_supports_powershell_env_output
       - test_cli_auth_login_req_ops_015_quotes_empty_bearer_token_exports
+      - test_cli_auth_token_clear_req_ops_015_prints_shell_specific_unsets
+      - test_cli_auth_login_req_ops_015_persists_cli_session_for_followup_commands
+      - test_cli_auth_token_clear_req_ops_015_clears_saved_cli_session
       - test_cli_auth_login_req_ops_015_help_scopes_mock_oauth_proxy_token_requirement
+    - file: ugoite-cli/src/http.rs
+      tests:
+      - test_dev_local_auth_headers_req_ops_015_only_allow_loopback_hosts
+    - file: ugoite-cli/tests/test_cli_req_ops_006_config_helpers.rs
+      tests:
+      - test_cli_req_ops_015_auth_session_helpers_cover_unreadable_and_error_paths
     e2e:
     - file: e2e/smoke.test.ts
       tests:
+      - 'REQ-OPS-015: browser mock-oauth login reaches /spaces with an HttpOnly auth cookie and default ahead of reserved admin-space'
       - 'REQ-OPS-015: visiting login does not clear an existing browser auth cookie'
+    - file: e2e/public-pages.test.ts
+      tests:
+      - 'REQ-OPS-015: home page Log in is the primary CTA and Open Spaces is secondary for unauthenticated visitors'
 - set_id: REQCAT-OPS
   source_file: requirements/ops.yaml
   scope: Operational quality, workflow, and automation requirements.
@@ -756,6 +828,12 @@ requirements:
     - file: docs/tests/test_guides.py
       tests:
       - test_docs_req_ops_017_release_publish_exports_container_assets
+    - file: docs/tests/test_release_compose_auth_secrets.py
+      tests:
+      - test_docs_req_ops_017_release_compose_requires_install_specific_auth_values
+    - file: docs/tests/test_release_compose_directory_permissions.py
+      tests:
+      - test_docs_req_ops_017_release_quickstart_avoids_world_writable_spaces
 - set_id: REQCAT-OPS
   source_file: requirements/ops.yaml
   scope: Operational quality, workflow, and automation requirements.
@@ -802,6 +880,13 @@ requirements:
       - test_docs_req_ops_018_platform_installer_asset_validates_prerelease
       - test_docs_req_ops_018_release_publish_draft_job_checks_out_requested_target
       - test_docs_req_ops_018_release_publish_finalize_job_checks_out_target
+    - file: docs/tests/test_cli_verify_first_install.py
+      tests:
+      - test_docs_req_ops_018_cli_guide_leads_with_verify_first_release_install
+    vitest:
+    - file: docsite/src/lib/app-cli-published-install.test.ts
+      tests:
+      - 'REQ-OPS-018: app CLI landing page exposes the released install path before source builds'
     rust:
     - file: ugoite-cli/tests/integration_test.rs
       tests:
@@ -1363,3 +1448,193 @@ requirements:
       tests:
       - test_docs_req_ops_032_setup_installs_pre_commit_hooks
       - test_docs_req_ops_032_local_conventional_commit_hook_is_current
+- set_id: REQCAT-OPS
+  source_file: requirements/ops.yaml
+  scope: Operational quality, workflow, and automation requirements.
+  linked_policies:
+  - POL-003
+  - POL-005
+  - POL-008
+  - POL-009
+  - POL-010
+  - POL-013
+  linked_specifications:
+  - SPEC-TESTING-CICD
+  - SPEC-TESTING-STRATEGY
+  - SPEC-ARCH-STACK
+  - SPEC-PRODUCT-METRICS
+  id: REQ-OPS-033
+  title: Local Python Test Strictness Matches CI
+  description: 'Local backend, ugoite-core, and docs pytest tasks MUST reject Python
+
+    warnings and skipped tests with the same effective gates CI uses. The root
+
+    `mise run test` path MUST inherit those strict local tasks so a local green
+
+    result does not hide warning-only or skipped-test regressions that backend,
+
+    docs, or ugoite-core CI would reject.
+
+    '
+  related_spec:
+  - testing/ci-cd.md
+  - testing/strategy.md
+  priority: medium
+  status: implemented
+  tests:
+    pytest:
+    - file: docs/tests/test_guides.py
+      tests:
+      - test_docs_req_ops_033_python_test_strictness_parity_declared
+    - file: docs/tests/test_pytest_skip_guard.py
+      tests:
+      - test_req_ops_033_skip_guard_accepts_clean_report
+      - test_req_ops_033_skip_guard_rejects_skipped_report
+- set_id: REQCAT-OPS
+  source_file: requirements/ops.yaml
+  scope: Operational quality, workflow, and automation requirements.
+  linked_policies:
+  - POL-003
+  - POL-005
+  - POL-008
+  - POL-009
+  - POL-010
+  - POL-013
+  linked_specifications:
+  - SPEC-TESTING-CICD
+  - SPEC-TESTING-STRATEGY
+  - SPEC-ARCH-STACK
+  - SPEC-PRODUCT-METRICS
+  id: REQ-OPS-034
+  title: Local Direct-Process E2E Cleanup Is Explicit
+  description: 'The direct-process local E2E runner MUST only stop services it
+
+    started itself. If ports `3000` or `8000` are already occupied, `e2e/scripts/run-e2e.sh`
+
+    MUST fail fast and point contributors at an explicit cleanup command instead
+
+    of killing unrelated listeners. The destructive fallback MUST stay isolated
+
+    behind `mise run cleanup:ports`.
+
+    '
+  related_spec:
+  - testing/ci-cd.md
+  - testing/strategy.md
+  priority: medium
+  status: implemented
+  tests:
+    pytest:
+    - file: docs/tests/test_guides.py
+      tests:
+      - test_docs_req_ops_034_local_e2e_runner_requires_explicit_port_cleanup
+- set_id: REQCAT-OPS
+  source_file: requirements/ops.yaml
+  scope: Operational quality, workflow, and automation requirements.
+  linked_policies:
+  - POL-003
+  - POL-005
+  - POL-008
+  - POL-009
+  - POL-010
+  - POL-013
+  linked_specifications:
+  - SPEC-TESTING-CICD
+  - SPEC-TESTING-STRATEGY
+  - SPEC-ARCH-STACK
+  - SPEC-PRODUCT-METRICS
+  id: REQ-OPS-035
+  title: Container Runtime Hardening Defaults
+  description: 'Published backend container artifacts and repository-owned Kubernetes
+
+    deployment manifests MUST default to non-root execution. The backend image
+
+    MUST create and run as a dedicated non-root user, and the Helm backend/frontend
+
+    deployments MUST render baseline hardening defaults that disable privilege
+
+    escalation, drop unused Linux capabilities, and keep the backend `/data`
+
+    volume writable without falling back to root.
+
+    '
+  related_spec:
+  - architecture/stack.md
+  - ../guide/helm-chart.md
+  priority: high
+  status: implemented
+  tests:
+    pytest:
+    - file: docs/tests/test_helm_chart.py
+      tests:
+      - test_docs_req_ops_035_backend_image_runs_as_non_root
+      - test_docs_req_ops_035_helm_security_defaults_are_hardened
+      - test_docs_req_ops_035_hardening_docs_stay_visible
+- set_id: REQCAT-OPS
+  source_file: requirements/ops.yaml
+  scope: Operational quality, workflow, and automation requirements.
+  linked_policies:
+  - POL-003
+  - POL-005
+  - POL-008
+  - POL-009
+  - POL-010
+  - POL-013
+  linked_specifications:
+  - SPEC-TESTING-CICD
+  - SPEC-TESTING-STRATEGY
+  - SPEC-ARCH-STACK
+  - SPEC-PRODUCT-METRICS
+  id: REQ-OPS-036
+  title: Contributor Workflow Guide Stays Spec-Driven
+  description: 'Contributor-facing workflow docs MUST surface one canonical guide
+
+    that explains when to update `docs/spec/features`, `docs/spec/requirements`,
+    user guides, and docsite surfaces; how REQ-* traceability maps tests back to
+    requirements; which local commands mirror CI; and which docsite navigation
+    files must change when routes or guide entry points move.
+
+    '
+  related_spec:
+  - testing/ci-cd.md
+  - ../README.md
+  priority: medium
+  status: implemented
+  tests:
+    pytest:
+    - file: docs/tests/test_contributing_guide.py
+      tests:
+      - test_docs_req_ops_036_contributor_workflow_guide_stays_traceable
+- set_id: REQCAT-OPS
+  source_file: requirements/ops.yaml
+  scope: Operational quality, workflow, and automation requirements.
+  linked_policies:
+  - POL-003
+  - POL-005
+  - POL-008
+  - POL-009
+  - POL-010
+  - POL-013
+  linked_specifications:
+  - SPEC-TESTING-CICD
+  - SPEC-TESTING-STRATEGY
+  - SPEC-ARCH-STACK
+  - SPEC-PRODUCT-METRICS
+  id: REQ-OPS-037
+  title: Browser Walkthrough Keeps Form Terminology
+  description: 'The browser walkthrough guide MUST keep newcomer-facing Form terminology
+
+    in the starter-entry flow and MUST NOT reintroduce legacy schema wording in
+
+    that guide.
+
+    '
+  related_spec:
+  - ../guide/browser-first-entry.md
+  priority: medium
+  status: implemented
+  tests:
+    pytest:
+    - file: docs/tests/test_browser_walkthrough_form_terminology.py
+      tests:
+      - test_docs_req_ops_037_browser_walkthrough_uses_form_terminology

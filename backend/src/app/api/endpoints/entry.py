@@ -3,10 +3,10 @@
 import json
 import logging
 import uuid
-from typing import Any
+from typing import Annotated, Any
 
 import ugoite_core
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 
 from app.api.endpoints.space import (
     _ensure_space_exists,
@@ -22,6 +22,14 @@ from app.models.payloads import EntryCreate, EntryRestore, EntryUpdate
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _entry_response(entry: dict[str, Any]) -> dict[str, Any]:
+    response = dict(entry)
+    content = response.get("content")
+    if isinstance(content, str) and "markdown" not in response:
+        response["markdown"] = content
+    return response
 
 
 @router.post(
@@ -48,19 +56,19 @@ async def create_entry_endpoint(
         await _validate_entry_markdown_against_form(
             storage_config,
             space_id,
-            payload.content,
+            payload.markdown,
         )
         await ugoite_core.require_markdown_write(
             storage_config,
             space_id,
             identity,
-            payload.content,
+            payload.markdown,
         )
         await ugoite_core.create_entry(
             storage_config,
             space_id,
             entry_id,
-            payload.content,
+            payload.markdown,
         )
         entry_data = await ugoite_core.get_entry(storage_config, space_id, entry_id)
     except ugoite_core.AuthorizationError as exc:
@@ -125,6 +133,50 @@ async def list_entries_endpoint(
         ) from e
 
 
+@router.get("/spaces/{space_id}/entries/options")
+async def list_entry_options_endpoint(
+    space_id: str,
+    request: Request,
+    form: Annotated[str | None, Query(min_length=1)] = None,
+    q: Annotated[str | None, Query(min_length=1, max_length=512)] = None,
+    limit: Annotated[int, Query(ge=1, le=20)] = 8,
+) -> list[dict[str, Any]]:
+    """List bounded entry summaries for UI pickers."""
+    identity = request_identity(request)
+    _validate_path_id(space_id, "space_id")
+    storage_config = _storage_config()
+    await _ensure_space_exists(storage_config, space_id)
+
+    try:
+        await ugoite_core.require_space_action(
+            storage_config,
+            space_id,
+            identity,
+            "entry_read",
+        )
+        options = await ugoite_core.list_entry_summaries(
+            storage_config,
+            space_id,
+            form_name=form,
+            query=q,
+            limit=limit,
+        )
+        return await ugoite_core.filter_readable_entries(
+            storage_config,
+            space_id,
+            identity,
+            options,
+        )
+    except ugoite_core.AuthorizationError as exc:
+        raise_authorization_http_error(exc, space_id=space_id)
+    except Exception as e:
+        logger.exception("Failed to list entry picker options")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
+        ) from e
+
+
 @router.get("/spaces/{space_id}/entries/{entry_id}")
 async def get_entry_endpoint(
     space_id: str,
@@ -160,7 +212,7 @@ async def get_entry_endpoint(
             detail=str(e),
         ) from e
     else:
-        return entry
+        return _entry_response(entry)
 
 
 @router.put("/spaces/{space_id}/entries/{entry_id}")
@@ -228,7 +280,7 @@ async def update_entry_endpoint(
                     status_code=status.HTTP_409_CONFLICT,
                     detail={
                         "message": msg,
-                        "current_revision": current_entry,
+                        "current_revision": _entry_response(current_entry),
                     },
                 ) from e
             except RuntimeError:
@@ -369,11 +421,13 @@ async def get_entry_revision_endpoint(
             identity,
             current_entry,
         )
-        return await ugoite_core.get_entry_revision(
-            storage_config,
-            space_id,
-            entry_id,
-            revision_id,
+        return _entry_response(
+            await ugoite_core.get_entry_revision(
+                storage_config,
+                space_id,
+                entry_id,
+                revision_id,
+            ),
         )
     except ugoite_core.AuthorizationError as exc:
         raise_authorization_http_error(exc, space_id=space_id)
@@ -450,4 +504,4 @@ async def restore_entry_endpoint(
             detail=str(e),
         ) from e
 
-    return entry_data
+    return _entry_response(entry_data)

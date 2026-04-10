@@ -6,7 +6,7 @@
 
 ## Vision
 
-**"Local-First Knowledge Space for the Post-SaaS Era"**
+**"Local-First Knowledge Space with a Resource-First MCP Surface for the Post-SaaS Era"**
 
 `v0.1` ships the local-first core plus a resource-first MCP baseline. Broader
 AI-native workflows, including wider MCP resource coverage and tool exposure,
@@ -20,6 +20,10 @@ Ugoite is a knowledge management system built on three core principles:
 | **Easy** | Markdown-first with automatic structure extraction |
 | **Freedom** | Your data, your storage, your AI - no vendor lock-in |
 
+Today the shipped AI surface is **resource-first MCP access**: one read-only
+resource is available now, while prompts and tool-style MCP workflows remain
+future work.
+
 ---
 
 ## Quick Navigation
@@ -29,6 +33,7 @@ Ugoite is a knowledge management system built on three core principles:
 - [Container Quick Start](../guide/container-quickstart.md) - Fastest published browser path, with backend + frontend runtime and explicit login
 - [CLI Guide](../guide/cli.md) - Lightest local-first path when you want direct filesystem access in `core` mode
 - [Local Dev Auth/Login](../guide/local-dev-auth-login.md) - Canonical local sign-in and `/login` flow for source development
+- [Browser Walkthrough](../guide/browser-first-entry.md) - Concrete post-login path for the first space, form, and entry
 
 ### Entry-Path Trade-offs
 
@@ -46,7 +51,7 @@ Ugoite is a knowledge management system built on three core principles:
 - [Future-Proofing](architecture/future-proofing.md) - Experimental direction (BYOAI, multi-platform core)
 
 ### Features & Stories
-- [Features Registry](features/README.md) - API-level feature registry across modules
+- [Features Registry](features/README.md) - API-level feature registry across modules; browser authoring modes stay in interface/frontend specs
 - [Ugoite SQL](features/sql.md) - SQL dialect for structured queries
 - [Core Stories](stories/core.yaml) - Essential user scenarios
 - [Advanced Stories](stories/advanced.yaml) - Power user and experimental features
@@ -57,16 +62,16 @@ Ugoite is a knowledge management system built on three core principles:
 ### Data Model
 - [Data Model Overview](data-model/overview.md) - How data is stored and structured
 - [Directory Structure](data-model/directory-structure.md) - Space layout conventions
-- [SQL Sessions & Materialized Views](data-model/sql-sessions.md) - SQL execution metadata
+- [SQL Sessions & Materialized View Metadata](data-model/sql-sessions.md) - SQL execution metadata and current view placeholders
 
 ### API Reference
 - [REST API](api/rest.md) - HTTP endpoints for frontend integration
-- [MCP Protocol](api/mcp.md) - AI agent interface via Model Context Protocol
+- [MCP Protocol](api/mcp.md) - Current resource-first MCP surface for AI agents; prompts and tool-style workflows remain future work
 - [OpenAPI Spec](api/openapi.yaml) - Machine-readable API definition
 
 ### Requirements
 - [Requirements Overview](requirements/README.md) - How requirements are tracked
-- Requirements by category: [storage](requirements/storage.yaml) | [entry](requirements/entry.yaml) | [index](requirements/index.yaml) | [integrity](requirements/integrity.yaml) | [security](requirements/security.yaml) | [api](requirements/api.yaml) | [frontend](requirements/frontend.yaml) | [e2e](requirements/e2e.yaml) | [ops](requirements/ops.yaml) | [form](requirements/form.yaml) | [links](requirements/links.yaml) | [search](requirements/search.yaml)
+- Requirements by category: [storage](requirements/storage.yaml) | [asset](requirements/asset.yaml) | [entry](requirements/entry.yaml) | [index](requirements/index.yaml) | [integrity](requirements/integrity.yaml) | [security](requirements/security.yaml) | [api](requirements/api.yaml) | [frontend](requirements/frontend.yaml) | [e2e](requirements/e2e.yaml) | [ops](requirements/ops.yaml) | [form](requirements/form.yaml) | [links](requirements/links.yaml) | [search](requirements/search.yaml)
 
 ### Governance Taxonomy
 - [Philosophy](philosophy/foundation.yaml) - Constitutional-level ideals
@@ -99,7 +104,7 @@ Ugoite is a knowledge management system built on three core principles:
 | `ugoite-core` | OpenDAL/Iceberg adapter layer, persistence, Python bindings | Rust |
 | `ugoite-cli` | Command-line interface for direct user interaction | Rust |
 | `backend` | REST API, MCP server (delegates to ugoite-core) | Python (FastAPI) |
-| `frontend` | UI rendering, optimistic updates (no data logic) | TypeScript (SolidStart) |
+| `frontend` | UI rendering, client-side state, optimistic updates (no business or persistence logic) | TypeScript (SolidStart) |
 
 ---
 
@@ -131,9 +136,12 @@ which ones are required, and how Markdown content maps onto structured data.
 Forms are the bridge between writing-friendly editing and reliable automation.
 
 ### Search and indexes
-Search and indexes are derived from entries and forms; they are not the primary
-source of truth. That keeps the system local-first and easier to reason about,
-because the canonical data stays in the space itself.
+Search and derived indexes are read-optimized artifacts built from entries and
+forms; they are not the primary source of truth. That keeps the system
+local-first and easier to reason about, because the canonical data stays in the
+space itself. When this spec refers to the `Indexer` requirements set
+(`REQ-IDX-*`), it means the structured-extraction and indexing pipeline that
+produces or refreshes those derived artifacts.
 
 ---
 

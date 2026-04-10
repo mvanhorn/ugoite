@@ -87,6 +87,48 @@ fn setup_space_with_form(dir: &tempfile::TempDir, space_id: &str) -> (String, Pa
     (root, config_path, space_path)
 }
 
+/// REQ-SEC-007: CLI space patch must reject membership-managed settings keys.
+#[test]
+fn test_cli_req_sec_007_space_patch_rejects_membership_managed_settings() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (_root, config_path, space_path) = setup_space(&dir, "space-membership-guard");
+    let reserved_keys = [
+        "admin_user_ids",
+        "invitations",
+        "member_roles",
+        "members",
+        "membership_version",
+        "owner_user_id",
+    ];
+
+    for key in reserved_keys {
+        let mut settings = serde_json::Map::new();
+        settings.insert(key.to_string(), Value::String("sentinel".to_string()));
+
+        let patch_output = cli_command(&config_path)
+            .args([
+                "space",
+                "patch",
+                &space_path,
+                "--settings",
+                &Value::Object(settings).to_string(),
+            ])
+            .output()
+            .expect("space patch membership guard");
+
+        assert!(
+            !patch_output.status.success(),
+            "expected rejection for reserved key {key}"
+        );
+        assert!(
+            String::from_utf8_lossy(&patch_output.stderr)
+                .contains(&format!("membership-managed settings keys: {key}")),
+            "missing reserved key {key} in stderr: {}",
+            String::from_utf8_lossy(&patch_output.stderr),
+        );
+    }
+}
+
 fn create_entry(config_path: &Path, space_path: &str, entry_id: &str, content: &str) {
     let output = cli_command(config_path)
         .args([
@@ -117,19 +159,33 @@ fn test_cli_req_ops_006_main_auth_and_config_error_paths() {
         .contains("Invalid mode: invalid. Use core, backend, or api"));
 
     let config_without_mode = cli_command(&config_path)
-        .args([
-            "config",
-            "set",
-            "--backend-url",
-            "http://backend.example.test",
-        ])
+        .args(["config", "set", "--backend-url", "http://127.0.0.1:9000"])
         .output()
         .expect("config set without mode");
     assert_success(&config_without_mode, "config set without mode");
     assert_eq!(
         parse_stdout_json(&config_without_mode)["config"]["backend_url"].as_str(),
-        Some("http://backend.example.test")
+        Some("http://127.0.0.1:9000")
     );
+
+    let config_set_help = cli_command(&config_path)
+        .args(["config", "set", "--help"])
+        .output()
+        .expect("config set help");
+    assert_success(&config_set_help, "config set help");
+    let config_set_help_stdout = String::from_utf8_lossy(&config_set_help.stdout);
+    for needle in [
+        "Which mode should you use?",
+        "local checkout or local spaces/ directory",
+        "talk to a backend server directly",
+        "same proxied /api surface as the frontend",
+        "Why core is the default:",
+    ] {
+        assert!(
+            config_set_help_stdout.contains(needle),
+            "{config_set_help_stdout}"
+        );
+    }
 
     let current_core = cli_command(&config_path)
         .args(["config", "current"])
@@ -139,6 +195,8 @@ fn test_cli_req_ops_006_main_auth_and_config_error_paths() {
     let current_core_stdout = String::from_utf8_lossy(&current_core.stdout);
     assert!(current_core_stdout.contains("Current endpoint mode: core"));
     assert!(current_core_stdout.contains("local filesystem"));
+    assert!(current_core_stdout.contains("local checkout or local spaces/ directory"));
+    assert!(current_core_stdout.contains("shortest local-first path"));
 
     let switch_to_api_from_core = cli_command(&config_path)
         .args([
@@ -147,7 +205,7 @@ fn test_cli_req_ops_006_main_auth_and_config_error_paths() {
             "--mode",
             "api",
             "--api-url",
-            "http://api.example.test/api",
+            "http://localhost:3000/api",
         ])
         .output()
         .expect("config switch to api from core");
@@ -163,7 +221,9 @@ fn test_cli_req_ops_006_main_auth_and_config_error_paths() {
     assert_success(&current_api, "config current api");
     let current_api_stdout = String::from_utf8_lossy(&current_api.stdout);
     assert!(current_api_stdout.contains("Current endpoint mode: api"));
-    assert!(current_api_stdout.contains("http://api.example.test/api"));
+    assert!(current_api_stdout.contains("same proxied /api surface as the frontend"));
+    assert!(current_api_stdout.contains("http://localhost:3000/api"));
+    assert!(current_api_stdout.contains("same proxied /api surface as the frontend"));
     assert!(current_api_stdout.contains("remote API instead of your local filesystem"));
 
     let switch_to_core_from_api = cli_command(&config_path)
@@ -184,7 +244,7 @@ fn test_cli_req_ops_006_main_auth_and_config_error_paths() {
             "--mode",
             "backend",
             "--backend-url",
-            "http://backend.example.test",
+            "http://127.0.0.1:9000",
         ])
         .output()
         .expect("config switch to backend");
@@ -200,7 +260,9 @@ fn test_cli_req_ops_006_main_auth_and_config_error_paths() {
     assert_success(&current_backend, "config current backend");
     let current_backend_stdout = String::from_utf8_lossy(&current_backend.stdout);
     assert!(current_backend_stdout.contains("Current endpoint mode: backend"));
-    assert!(current_backend_stdout.contains("http://backend.example.test"));
+    assert!(current_backend_stdout.contains("talk to a backend server directly"));
+    assert!(current_backend_stdout.contains("http://127.0.0.1:9000"));
+    assert!(current_backend_stdout.contains("talk to a backend server directly"));
     assert!(current_backend_stdout.contains("server instead of your local filesystem"));
 
     let switch_to_api_from_backend = cli_command(&config_path)
@@ -210,7 +272,7 @@ fn test_cli_req_ops_006_main_auth_and_config_error_paths() {
             "--mode",
             "api",
             "--api-url",
-            "http://api.example.test/v2",
+            "http://localhost:3000/v2",
         ])
         .output()
         .expect("config switch to api from backend");
@@ -221,7 +283,7 @@ fn test_cli_req_ops_006_main_auth_and_config_error_paths() {
     let switch_to_api_from_backend_stderr =
         String::from_utf8_lossy(&switch_to_api_from_backend.stderr);
     assert!(switch_to_api_from_backend_stderr.contains("Switched to api mode"));
-    assert!(switch_to_api_from_backend_stderr.contains("http://api.example.test/v2"));
+    assert!(switch_to_api_from_backend_stderr.contains("http://localhost:3000/v2"));
     assert!(switch_to_api_from_backend_stderr.contains("ugoite config set --mode core"));
 
     let switch_to_backend_from_api = cli_command(&config_path)
@@ -231,7 +293,7 @@ fn test_cli_req_ops_006_main_auth_and_config_error_paths() {
             "--mode",
             "backend",
             "--backend-url",
-            "http://backend-two.example.test",
+            "http://127.0.0.1:9100",
         ])
         .output()
         .expect("config switch to backend from api");
@@ -242,7 +304,7 @@ fn test_cli_req_ops_006_main_auth_and_config_error_paths() {
     let switch_to_backend_from_api_stderr =
         String::from_utf8_lossy(&switch_to_backend_from_api.stderr);
     assert!(switch_to_backend_from_api_stderr.contains("Switched to backend mode"));
-    assert!(switch_to_backend_from_api_stderr.contains("http://backend-two.example.test"));
+    assert!(switch_to_backend_from_api_stderr.contains("http://127.0.0.1:9100"));
     assert!(switch_to_backend_from_api_stderr.contains("ugoite config set --mode core"));
 
     write_endpoint_config(
@@ -853,6 +915,12 @@ fn test_cli_req_ops_006_query_help_rejects_removed_flags() {
     assert!(!help_text.contains("--offset"));
     assert!(!help_text.contains("--form"));
     assert!(!help_text.contains("--tag"));
+    assert!(!help_text.contains("body"));
+    assert!(!help_text.contains("created_at"));
+    assert!(help_text.contains("updated_at"));
+    assert!(help_text.contains("word_count"));
+    assert!(help_text.contains("space_id"));
+    assert!(help_text.contains("properties.<field>"));
 
     let removed_flag_output = cli_command(&config_path)
         .args([
@@ -1042,13 +1110,18 @@ fn test_cli_req_ops_006_space_local_and_remote_paths() {
         )
     );
 
+    let backend_api_mode_hint = "Run `ugoite config current` to inspect the active mode, then switch with `ugoite config set --mode backend --backend-url http://localhost:8000` or `ugoite config set --mode api --api-url http://localhost:3000/api`.";
+
     let service_account_list_core = cli_command(&config_path)
         .args(["space", "service-account-list", "space-local"])
         .output()
         .expect("space service-account-list core");
     assert!(!service_account_list_core.status.success());
-    assert!(String::from_utf8_lossy(&service_account_list_core.stderr)
-        .contains("service-account-list requires backend or api mode"));
+    let service_account_list_stderr = String::from_utf8_lossy(&service_account_list_core.stderr);
+    assert!(
+        service_account_list_stderr.contains("service-account-list requires backend or api mode")
+    );
+    assert!(service_account_list_stderr.contains(backend_api_mode_hint));
 
     let service_account_create_core = cli_command(&config_path)
         .args([
@@ -1063,24 +1136,29 @@ fn test_cli_req_ops_006_space_local_and_remote_paths() {
         .output()
         .expect("space service-account-create core");
     assert!(!service_account_create_core.status.success());
-    assert!(String::from_utf8_lossy(&service_account_create_core.stderr)
+    let service_account_create_stderr =
+        String::from_utf8_lossy(&service_account_create_core.stderr);
+    assert!(service_account_create_stderr
         .contains("service-account-create requires backend or api mode"));
+    assert!(service_account_create_stderr.contains(backend_api_mode_hint));
 
     let members_core = cli_command(&config_path)
         .args(["space", "members", &space_path])
         .output()
         .expect("space members core");
     assert!(!members_core.status.success());
-    assert!(String::from_utf8_lossy(&members_core.stderr)
-        .contains("members requires backend or api mode"));
+    let members_stderr = String::from_utf8_lossy(&members_core.stderr);
+    assert!(members_stderr.contains("members requires backend or api mode"));
+    assert!(members_stderr.contains(backend_api_mode_hint));
 
     let audit_events_core = cli_command(&config_path)
         .args(["space", "audit-events", &space_path])
         .output()
         .expect("space audit-events core");
     assert!(!audit_events_core.status.success());
-    assert!(String::from_utf8_lossy(&audit_events_core.stderr)
-        .contains("audit-events requires backend or api mode"));
+    let audit_events_stderr = String::from_utf8_lossy(&audit_events_core.stderr);
+    assert!(audit_events_stderr.contains("audit-events requires backend or api mode"));
+    assert!(audit_events_stderr.contains(backend_api_mode_hint));
 
     let remote_config_path = dir.path().join("remote-space-config.json");
     let (base, requests, handle) =
@@ -1135,6 +1213,31 @@ fn test_cli_req_ops_006_space_local_and_remote_paths() {
     assert!(remote_patch_request.contains(r#""name":"Remote""#));
     assert!(remote_patch_request.contains(r#""storage_config":{"uri":"memory://remote"}"#));
     assert!(remote_patch_request.contains(r#""settings":{"theme":"dark"}"#));
+
+    let (base, requests, handle) =
+        spawn_recording_server("HTTP/1.1 200 OK", r#"{"id":"remote-space","settings":[]}"#);
+    write_endpoint_config(
+        &remote_config_path,
+        "backend",
+        &base,
+        &format!("{base}/api"),
+    );
+    let remote_array_settings_patch_output = cli_command(&remote_config_path)
+        .args(["space", "patch", "remote-space", "--settings", r#"[]"#])
+        .output()
+        .expect("remote space patch array settings");
+    assert_success(
+        &remote_array_settings_patch_output,
+        "remote space patch array settings",
+    );
+    let remote_array_settings_patch_request = requests
+        .recv_timeout(Duration::from_secs(5))
+        .expect("remote space patch array settings request");
+    handle
+        .join()
+        .expect("join remote space patch array settings server");
+    assert!(remote_array_settings_patch_request.starts_with("PATCH /spaces/remote-space HTTP/1.1",));
+    assert!(remote_array_settings_patch_request.contains(r#""settings":[]}"#));
 
     let (base, requests, handle) = spawn_recording_server("HTTP/1.1 200 OK", r#"[]"#);
     write_endpoint_config(
@@ -1479,7 +1582,7 @@ fn test_cli_req_ops_006_entry_local_and_remote_paths() {
     handle.join().expect("join remote entry create server");
     assert!(remote_create_request.starts_with("POST /spaces/remote-space/entries HTTP/1.1"));
     assert!(remote_create_request.contains(r#""id":"entry-1""#));
-    assert!(remote_create_request.contains("\"content\":\"# Remote Entry\""));
+    assert!(remote_create_request.contains("\"markdown\":\"# Remote Entry\""));
     assert!(!remote_create_request.contains(r#""author":"#));
 
     let (base, requests, handle) = spawn_recording_server("HTTP/1.1 200 OK", r#"{"updated":true}"#);

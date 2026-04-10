@@ -84,20 +84,31 @@ const store = createEntryStore(...);  // NO! Violates responsibility
 
 ### Prerequisites
 
-- Node.js >= 22
-- Backend service running (see backend README)
+- For contributor-managed tool versions, use the repository root `mise.toml`
+  via `mise run setup`.
+- Backend service running (see backend README) if you are not using the root
+  `mise run dev` workflow.
 
 ### Installation
 
 ```bash
-npm install
+mise run //frontend:install
 ```
 
 ### Development
 
+For the canonical auth-aware contributor workflow that starts backend,
+frontend, and docsite together, return to the repository root and run
+`mise run dev` as described in the main [README](../README.md#setup--development-mise).
+
+Use the command below only when you intentionally want frontend-isolated
+iteration and already have a reachable local backend. If the frontend throws a
+`BACKEND_URL must be set` startup error, that is your cue to go back to the
+repository root and use `mise run dev` instead:
+
 ```bash
-# Set backend URL and start dev server
-BACKEND_URL=http://localhost:8000 npm run dev
+# Start the frontend-only dev server
+mise run //frontend:dev
 ```
 
 ### Testing

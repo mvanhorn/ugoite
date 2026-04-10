@@ -3,7 +3,45 @@
 This guide explains the recommended release-install path for `ugoite`, then
 covers the Cargo-based workflow contributors still use inside the repository.
 
+This is the lowest-setup-cost local-first path today. In `core` mode the CLI
+works directly against the local spaces directory, so you can start without a
+Docker stack, frontend process, or browser login flow.
+
 ## Install the released CLI (recommended)
+
+### Verify-first archive install
+
+If you want the most auditable published path, install from an exact release
+archive and verify its checksum before you extract or run anything:
+
+```bash
+VERSION=0.1.0
+TARGET=x86_64-unknown-linux-gnu
+BASE_URL="https://github.com/ugoite/ugoite/releases/download/v${VERSION}"
+
+curl -fsSLO "${BASE_URL}/ugoite-v${VERSION}-${TARGET}.tar.gz"
+curl -fsSLO "${BASE_URL}/ugoite-v${VERSION}-${TARGET}.tar.gz.sha256"
+
+# Linux
+sha256sum -c "ugoite-v${VERSION}-${TARGET}.tar.gz.sha256"
+# macOS
+shasum -a 256 -c "ugoite-v${VERSION}-${TARGET}.tar.gz.sha256"
+
+tar -xzf "ugoite-v${VERSION}-${TARGET}.tar.gz"
+mkdir -p "$HOME/.local/bin"
+install -m 0755 ugoite "$HOME/.local/bin/ugoite"
+ugoite --help
+```
+
+Swap `TARGET` for one of the published release targets listed below. This path
+keeps checksum verification ahead of extraction and ahead of any installer
+script execution.
+
+### Bootstrap helpers (secondary)
+
+If you want fewer manual steps and you already trust the bootstrap helper
+itself, use one of these shortcuts after considering the verify-first archive
+path above.
 
 Install the public `ugoite` npm bootstrap package:
 
@@ -23,10 +61,11 @@ ugoite --help
 
 The published package metadata lives in `packages/ugoite/package.json`, while
 the repository root `package.json` stays private tooling for Husky/commitlint
-and release automation.
+and release automation. The shared helper script behind the npm bootstrap and
+rendered release installers lives at `scripts/install-ugoite-cli.sh`.
 
-If you prefer the direct shell bootstrap, install the latest stable release with
-a one-liner:
+If you still prefer the direct shell bootstrap, keep it as an explicit
+trust-the-script shortcut rather than the default recommendation:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ugoite/ugoite/main/scripts/install-ugoite-cli.sh | bash
@@ -208,13 +247,44 @@ ugoite space list .
 
 Backend and API modes still accept bare space IDs such as `demo`.
 
+## Migration: hidden deprecated command names
+
+Two older command names still exist only as hidden compatibility shims. Update
+older snippets to the supported forms below instead of copying the deprecated
+names forward:
+
+| Hidden command | Replace it with | How to update old examples |
+| --- | --- | --- |
+| `ugoite create-space <SPACE_ID>` | `ugoite space create <SPACE_ID_OR_PATH>` | In `core` mode, pass the full local target such as `./spaces/demo` or `/root/spaces/demo`. In `backend` and `api` modes, keep using a bare space ID such as `demo`. Run `ugoite config current` first if you are unsure which mode is active. |
+| `ugoite link create`, `ugoite link list`, `ugoite link delete` | Form-backed entry relationships using `row_reference` fields | Define the relationship in the Form itself, for example `{ "type": "row_reference", "target_form": "Project" }`, then create or update entries through the normal form-backed entry flow instead of managing standalone link records. |
+
+If you still have old automation that uses `create-space`, these examples show
+the exact migration:
+
+```bash
+# Before
+ugoite create-space demo --root .
+ugoite create-space demo
+
+# After
+ugoite space create ./spaces/demo
+ugoite space create demo
+```
+
 ## Endpoint routing mode
 
 CLI can run in three modes, and stores the selection in `~/.ugoite/cli-endpoints.json`.
 
-- `core`: call `ugoite-core` directly (default)
-- `backend`: call backend REST endpoints directly (e.g. `http://localhost:8000`)
-- `api`: call the frontend-proxied API base (e.g. `http://localhost:3000/api`)
+If you are choosing for the first time, use this rule of thumb:
+
+| Mode | Choose it when | Practical trade-off |
+| --- | --- | --- |
+| `core` | You are working directly with a local checkout or local `spaces/` directory on this machine | Reads and writes your filesystem directly with no backend required. This is the default because it is the shortest local-first path. |
+| `backend` | You want the CLI to talk to a backend server directly | Uses backend REST endpoints and the server's storage/auth behavior instead of your local filesystem. |
+| `api` | You want the CLI to use the same proxied `/api` surface as the frontend | Follows the frontend-facing API path and its proxy/auth behavior instead of direct local access. |
+
+Switch away from `core` only when you specifically want server-backed behavior
+or the same frontend proxy path the browser uses.
 
 When mode is `backend` or `api`, remote commands accept a `SPACE_ID` (or the
 shared `SPACE_ID_OR_PATH` argument for commands that also work in `core` mode)
@@ -237,10 +307,9 @@ cargo run -q -p ugoite-cli -- config set --mode api --api-url http://localhost:3
 cargo run -q -p ugoite-cli -- config set --mode core
 ```
 
-When you switch away from `core`, the CLI now prints a reminder that future
-commands will run against the configured server or API instead of your local
-filesystem. Use `ugoite config current` whenever you want a quick plain-language
-summary of the active topology and the command to return to `core`.
+Use `ugoite config current` whenever you want the same newcomer-facing summary
+in plain language, including when the current mode is a better fit than the
+other two and how to return to `core`.
 
 ## Auth profile commands
 
@@ -266,11 +335,37 @@ cargo run -q -p ugoite-cli -- auth profile
 cargo run -q -p ugoite-cli -- auth token-clear
 ```
 
+`ugoite auth login` saves a CLI-owned bearer-token session under the config home
+(for example `~/.ugoite/cli-auth.json`) so follow-up `ugoite` commands stay
+authenticated without `eval`. It still prints shell exports when you also want
+the current shell to reuse the same token.
+
+By default `ugoite auth login` and `ugoite auth token-clear` print POSIX
+`export` / `unset` lines. When you use fish or PowerShell, request shell-native
+output instead:
+
+```fish
+cargo run -q -p ugoite-cli -- auth login --shell fish --username dev-local-user --totp-code 123456 | source
+```
+
+```powershell
+cargo run -q -p ugoite-cli -- auth token-clear --shell powershell | Invoke-Expression
+```
+
+The same `--shell` flag also works with `ugoite auth logout`.
+
 `ugoite auth profile` distinguishes `core` mode (no backend credential required)
 from `backend` / `api` modes. In server-backed modes it tells you whether a
 bearer token or API key is already present, and whether the next step is
-`ugoite auth login` or `eval "$(ugoite auth token-clear)"` to apply the printed
-credential unsets from `ugoite auth token-clear` in your current shell.
+`ugoite auth login`, `ugoite auth token-clear`, or
+`eval "$(ugoite auth token-clear)"` to clear the saved CLI session and apply the
+printed credential unsets in your current shell.
+
+In POSIX shells, `eval "$(ugoite auth token-clear)"` applies the printed
+credential unsets to your current shell. In fish or PowerShell, use the
+matching shell-native variant instead, such as
+`ugoite auth token-clear --shell fish | source` or
+`ugoite auth token-clear --shell powershell | Invoke-Expression`.
 
 When the backend runs inside Docker/Compose and you target its published
 backend port directly, export the matching `UGOITE_DEV_AUTH_PROXY_TOKEN` value

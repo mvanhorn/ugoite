@@ -1,12 +1,28 @@
 use crate::config::{
-    base_url, effective_format, load_config, normalize_space_root, operator_for_path,
-    parse_space_path, print_json, print_json_table, print_list_table, resolve_space_reference,
-    Format,
+    effective_format, load_config, normalize_space_root, operator_for_path, parse_space_path,
+    print_json, print_json_table, print_list_table, resolve_space_reference, validated_base_url,
+    EndpointConfig, Format,
 };
 use crate::http;
 use anyhow::{bail, Result};
 use clap::{Args, Subcommand};
 use ugoite_core::sample_data::SampleDataOptions;
+
+const MEMBERSHIP_MANAGED_SPACE_SETTING_KEYS: &[&str] = &[
+    "admin_user_ids",
+    "invitations",
+    "member_roles",
+    "members",
+    "membership_version",
+    "owner_user_id",
+];
+
+fn backend_api_mode_error(config: &EndpointConfig, command_name: &str) -> String {
+    format!(
+        "{command_name} requires backend or api mode.\nRun `ugoite config current` to inspect the active mode, then switch with `ugoite config set --mode backend --backend-url {}` or `ugoite config set --mode api --api-url {}`.",
+        config.backend_url, config.api_url
+    )
+}
 
 #[derive(Args)]
 pub struct SpaceCmd {
@@ -208,13 +224,35 @@ fn resolve_sample_owner_user_id(owner: Option<String>) -> Option<String> {
     }
 }
 
+fn validate_patch_settings(settings: &serde_json::Value) -> Result<()> {
+    let Some(settings_obj) = settings.as_object() else {
+        return Ok(());
+    };
+
+    let mut reserved_keys: Vec<&str> = settings_obj
+        .keys()
+        .map(String::as_str)
+        .filter(|key| MEMBERSHIP_MANAGED_SPACE_SETTING_KEYS.contains(key))
+        .collect();
+    reserved_keys.sort_unstable();
+
+    if reserved_keys.is_empty() {
+        return Ok(());
+    }
+
+    bail!(
+        "space patch does not allow membership-managed settings keys: {}. Use the dedicated member commands instead.",
+        reserved_keys.join(", ")
+    )
+}
+
 pub async fn create_space_cmd(
     root_path: Option<&str>,
     space_id: &str,
     command_name: &str,
 ) -> Result<()> {
     let config = load_config();
-    if let Some(base) = base_url(&config) {
+    if let Some(base) = validated_base_url(&config)? {
         let result = http::http_post(
             &format!("{base}/spaces"),
             &serde_json::json!({"name": space_id}),
@@ -236,7 +274,7 @@ pub async fn run(cmd: SpaceCmd) -> Result<()> {
     match cmd.sub {
         SpaceSubCmd::Create { space_path } => {
             let (root, space_id) = resolve_space_reference(&config, &space_path, "space create")?;
-            if let Some(base) = base_url(&config) {
+            if let Some(base) = validated_base_url(&config)? {
                 let result = http::http_post(
                     &format!("{base}/spaces"),
                     &serde_json::json!({"name": space_id}),
@@ -250,7 +288,7 @@ pub async fn run(cmd: SpaceCmd) -> Result<()> {
             print_json(&serde_json::json!({"created": true, "id": space_id}));
         }
         SpaceSubCmd::List { root_path } => {
-            if let Some(base) = base_url(&config) {
+            if let Some(base) = validated_base_url(&config)? {
                 let result = http::http_get(&format!("{base}/spaces")).await?;
                 if fmt != Format::Json {
                     if let Some(arr) = result.as_array() {
@@ -272,7 +310,7 @@ pub async fn run(cmd: SpaceCmd) -> Result<()> {
         }
         SpaceSubCmd::Get { space_path } => {
             let (root, space_id) = resolve_space_reference(&config, &space_path, "space get")?;
-            if let Some(base) = base_url(&config) {
+            if let Some(base) = validated_base_url(&config)? {
                 let result = http::http_get(&format!("{base}/spaces/{space_id}")).await?;
                 print_json(&result);
                 return Ok(());
@@ -298,9 +336,10 @@ pub async fn run(cmd: SpaceCmd) -> Result<()> {
             }
             if let Some(s) = &settings {
                 let v: serde_json::Value = serde_json::from_str(s)?;
+                validate_patch_settings(&v)?;
                 patch.insert("settings".to_string(), v);
             }
-            if let Some(base) = base_url(&config) {
+            if let Some(base) = validated_base_url(&config)? {
                 let result = http::http_patch(
                     &format!("{base}/spaces/{space_id}"),
                     &serde_json::Value::Object(patch),
@@ -386,20 +425,23 @@ pub async fn run(cmd: SpaceCmd) -> Result<()> {
             print_json(&serde_json::json!({"status": "ok", "mode": mode}));
         }
         SpaceSubCmd::ServiceAccountList { space_id } => {
-            if let Some(base) = base_url(&config) {
+            if let Some(base) = validated_base_url(&config)? {
                 let result =
                     http::http_get(&format!("{base}/spaces/{space_id}/service-accounts")).await?;
                 print_json(&result);
                 return Ok(());
             }
-            bail!("service-account-list requires backend or api mode");
+            bail!(
+                "{}",
+                backend_api_mode_error(&config, "service-account-list")
+            );
         }
         SpaceSubCmd::ServiceAccountCreate {
             space_id,
             display_name,
             scopes,
         } => {
-            if let Some(base) = base_url(&config) {
+            if let Some(base) = validated_base_url(&config)? {
                 let result = http::http_post(
                     &format!("{base}/spaces/{space_id}/service-accounts"),
                     &serde_json::json!({
@@ -411,16 +453,19 @@ pub async fn run(cmd: SpaceCmd) -> Result<()> {
                 print_json(&result);
                 return Ok(());
             }
-            bail!("service-account-create requires backend or api mode");
+            bail!(
+                "{}",
+                backend_api_mode_error(&config, "service-account-create")
+            );
         }
         SpaceSubCmd::Members { space_path } => {
             let (_, space_id) = parse_space_path(&space_path);
-            if let Some(base) = base_url(&config) {
+            if let Some(base) = validated_base_url(&config)? {
                 let result = http::http_get(&format!("{base}/spaces/{space_id}/members")).await?;
                 print_json(&result);
                 return Ok(());
             }
-            bail!("members requires backend or api mode");
+            bail!("{}", backend_api_mode_error(&config, "members"));
         }
         SpaceSubCmd::AuditEvents {
             space_path,
@@ -428,7 +473,7 @@ pub async fn run(cmd: SpaceCmd) -> Result<()> {
             limit,
         } => {
             let (_, space_id) = parse_space_path(&space_path);
-            if let Some(base) = base_url(&config) {
+            if let Some(base) = validated_base_url(&config)? {
                 let result = http::http_get(&format!(
                     "{base}/spaces/{space_id}/audit-events?offset={offset}&limit={limit}"
                 ))
@@ -436,7 +481,7 @@ pub async fn run(cmd: SpaceCmd) -> Result<()> {
                 print_json(&result);
                 return Ok(());
             }
-            bail!("audit-events requires backend or api mode");
+            bail!("{}", backend_api_mode_error(&config, "audit-events"));
         }
     }
     Ok(())

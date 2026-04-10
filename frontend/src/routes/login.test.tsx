@@ -3,15 +3,29 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { http, HttpResponse } from "msw";
 import LoginRoute from "./login";
-import { clearAuthTokenCookie, setAuthTokenCookie } from "~/lib/auth-session";
 import { resetMockData, seedDevAuthConfig } from "~/test/mocks/handlers";
 import { server } from "~/test/mocks/server";
 
 const navigateMock = vi.fn();
 const containerQuickStartGuideUrl =
-	"https://github.com/ugoite/ugoite/blob/main/docs/guide/container-quickstart.md";
-const localDevAuthGuideUrl =
-	"https://github.com/ugoite/ugoite/blob/main/docs/guide/local-dev-auth-login.md";
+	"https://ugoite.github.io/ugoite/docs/guide/container-quickstart";
+const localDevAuthGuideUrl = "https://ugoite.github.io/ugoite/docs/guide/local-dev-auth-login";
+
+const findCookieDescriptor = () => {
+	let target: object | null = document;
+	while (target) {
+		const descriptor = Object.getOwnPropertyDescriptor(target, "cookie");
+		if (descriptor) {
+			return descriptor;
+		}
+		target = Object.getPrototypeOf(target);
+	}
+	return null;
+};
+
+const writeCookie = (value: string) => {
+	findCookieDescriptor()?.set?.call(document, value);
+};
 
 vi.mock("@solidjs/router", () => ({
 	A: (props: { href: string; class?: string; children: unknown }) => (
@@ -27,10 +41,10 @@ describe("/login", () => {
 	beforeEach(() => {
 		navigateMock.mockReset();
 		resetMockData();
-		clearAuthTokenCookie();
+		writeCookie("ugoite_auth_bearer_token=; Path=/; Max-Age=0; SameSite=Lax");
 	});
 
-	it("REQ-OPS-015: signs in with passkey-totp and stores a browser auth cookie", async () => {
+	it("REQ-OPS-015: signs in with passkey-totp without exposing a readable auth cookie", async () => {
 		seedDevAuthConfig({
 			mode: "passkey-totp",
 			username_hint: "dev-alice",
@@ -54,10 +68,10 @@ describe("/login", () => {
 		await waitFor(() => {
 			expect(navigateMock).toHaveBeenCalledWith("/spaces", { replace: true });
 		});
-		expect(document.cookie).toContain("ugoite_auth_bearer_token=frontend-test-token");
+		expect(document.cookie).not.toContain("ugoite_auth_bearer_token=");
 	});
 
-	it("REQ-OPS-015: uses explicit mock-oauth browser login without startup auth injection", async () => {
+	it("REQ-OPS-015: uses explicit mock-oauth browser login without exposing a readable auth cookie", async () => {
 		seedDevAuthConfig({
 			mode: "mock-oauth",
 			username_hint: "dev-oauth-user",
@@ -67,12 +81,17 @@ describe("/login", () => {
 
 		render(() => <LoginRoute />);
 
-		fireEvent.click(await screen.findByRole("button", { name: "Continue with Mock OAuth" }));
+		expect(
+			await screen.findByText(
+				"Use the explicit local demo login path to exercise the browser login flow without an external OAuth provider or startup auth bypass.",
+			),
+		).toBeInTheDocument();
+		fireEvent.click(await screen.findByRole("button", { name: "Continue with Local Demo Login" }));
 
 		await waitFor(() => {
 			expect(navigateMock).toHaveBeenCalledWith("/spaces", { replace: true });
 		});
-		expect(document.cookie).toContain("ugoite_auth_bearer_token=frontend-test-token");
+		expect(document.cookie).not.toContain("ugoite_auth_bearer_token=");
 	});
 
 	it("REQ-OPS-015: visiting login preserves an existing browser auth cookie until re-auth completes", async () => {
@@ -82,13 +101,28 @@ describe("/login", () => {
 			supports_passkey_totp: false,
 			supports_mock_oauth: true,
 		});
-		setAuthTokenCookie("existing-browser-session", 1_900_000_000);
+		writeCookie("ugoite_auth_bearer_token=existing-browser-session; Path=/; SameSite=Lax");
 
 		render(() => <LoginRoute />);
 
-		await screen.findByRole("button", { name: "Continue with Mock OAuth" });
+		await screen.findByRole("button", { name: "Continue with Local Demo Login" });
 		expect(document.cookie).toContain("ugoite_auth_bearer_token=existing-browser-session");
 		expect(navigateMock).not.toHaveBeenCalled();
+	});
+
+	it("REQ-OPS-015: keeps the /spaces shortcut out of signed-out login screens", async () => {
+		seedDevAuthConfig({
+			mode: "mock-oauth",
+			username_hint: "dev-oauth-user",
+			supports_passkey_totp: false,
+			supports_mock_oauth: true,
+		});
+
+		render(() => <LoginRoute />);
+
+		await screen.findByRole("button", { name: "Continue with Local Demo Login" });
+		expect(screen.getByRole("link", { name: "Back to Home" })).toHaveAttribute("href", "/");
+		expect(screen.queryByRole("link", { name: "Go to Spaces" })).not.toBeInTheDocument();
 	});
 
 	it("REQ-OPS-015: shows first-run passkey guidance with the canonical local auth guide", async () => {
@@ -124,7 +158,7 @@ describe("/login", () => {
 
 		render(() => <LoginRoute />);
 
-		await screen.findByRole("button", { name: "Continue with Mock OAuth" });
+		await screen.findByRole("button", { name: "Continue with Local Demo Login" });
 		expect(screen.queryByRole("heading", { name: "First time here?" })).not.toBeInTheDocument();
 		expect(screen.queryByRole("link", { name: "Local Dev Auth/Login" })).not.toBeInTheDocument();
 	});

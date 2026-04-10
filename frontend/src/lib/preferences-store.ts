@@ -1,12 +1,12 @@
 import { createRoot, createSignal } from "solid-js";
-import { initializeLocale, setLocale } from "./i18n";
-import { preferencesApi } from "./preferences-api";
+import { initializeLocale, setLocale } from "~/lib/i18n";
+import { preferencesApi } from "~/lib/preferences-api";
 import {
 	emptyUserPreferences,
 	readLocalPreferences,
 	writeLocalPreferences,
 } from "./preferences-local";
-import { initializeUiTheme, setColorMode, setPrimaryColor, setUiTheme } from "./ui-theme";
+import { initializeUiTheme, setColorMode, setPrimaryColor, setUiTheme } from "~/lib/ui-theme";
 import type { UserPreferences, UserPreferencesPatchPayload } from "./types";
 
 const mergePreferences = (
@@ -203,6 +203,7 @@ const preferencesStore = createRoot(() => {
 		portablePreferences,
 		initialized,
 		loading,
+		primePortablePreferencesFromLocal: syncLocalPreferences,
 		resetPortablePreferencesState,
 		initializePortablePreferences,
 		initializePortablePreferencesForPath,
@@ -238,6 +239,7 @@ const preferencesStore = createRoot(() => {
 export const portablePreferences = preferencesStore.portablePreferences;
 export const portablePreferencesInitialized = preferencesStore.initialized;
 export const portablePreferencesLoading = preferencesStore.loading;
+export const primePortablePreferencesFromLocal = preferencesStore.primePortablePreferencesFromLocal;
 export const resetPortablePreferencesState = preferencesStore.resetPortablePreferencesState;
 export const initializePortablePreferences = preferencesStore.initializePortablePreferences;
 export const initializePortablePreferencesForPath =

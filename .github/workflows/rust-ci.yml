@@ -95,22 +95,17 @@ jobs:
         run: uv run pytest -W error --junitxml=../core-pytest.xml
 
       - name: Fail on skipped core tests
-        run: |
-          python3 - <<'PY'
-          import xml.etree.ElementTree as ET
-          from pathlib import Path
-
-          report = Path("core-pytest.xml")
-          root = ET.parse(report).getroot()
-          suites = [root] if root.tag == "testsuite" else list(root.findall("testsuite"))
-          skipped = sum(int(float(s.attrib.get("skipped", "0") or 0)) for s in suites)
-          if skipped > 0:
-              raise SystemExit(f"ugoite-core tests: skipped={skipped} is not allowed")
-          PY
+        run: python3 scripts/check_pytest_no_skips.py core-pytest.xml "ugoite-core tests"
 
       - name: Enforce Rust coverage floor (core)
         working-directory: ./ugoite-core
-        run: cargo llvm-cov --summary-only --fail-under-lines 45
+        env:
+          CARGO_INCREMENTAL: 0
+          CARGO_PROFILE_DEV_DEBUG: 0
+          CARGO_PROFILE_TEST_DEBUG: 0
+          CARGO_BUILD_JOBS: 1
+          RUSTFLAGS: -C debuginfo=0
+        run: cargo llvm-cov --summary-only --fail-under-lines 45 --jobs 1
 
       - name: Run rustfmt check (cli)
         working-directory: ./ugoite-cli

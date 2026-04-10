@@ -21,6 +21,12 @@ targets an **Authenticated Access by Default** model.
 - Local development obtains browser/CLI bearer tokens through explicit
   `passkey-totp` or `mock-oauth` login endpoints after startup instead of
   injecting an authenticated token before the app starts.
+- Shipped release Compose and Helm surfaces require operator-supplied auth
+  secrets, and local-demo `mock-oauth` remains an explicit opt-in instead of
+  the manifest default.
+- CLI endpoint configuration only allows cleartext `http://` for loopback
+  development hosts (`localhost`, `127.0.0.1`, `[::1]`); remote credentialed
+  endpoints MUST use `https://`.
 - Space creation is further restricted to active admins of the reserved
   `admin-space`, and the creator of each non-admin space becomes that space's
   initial admin.
@@ -37,6 +43,17 @@ targets an **Authenticated Access by Default** model.
 - Set `UGOITE_ALLOW_REMOTE=true` to allow remote connections
 - Required for dev containers or Codespaces
 - Automatically configured in `mise run dev`
+- Also required for the published two-container release Compose quick start,
+  because the frontend container reaches the backend over the private Compose
+  bridge network; host exposure still remains localhost-only there because the
+  published ports bind to `127.0.0.1`
+- `UGOITE_TRUST_PROXY_HEADERS=true` only trusts forwarded client headers from
+  loopback proxy peers; direct remote clients cannot spoof `X-Forwarded-For`
+  into looking like localhost
+- The source `docker-compose.yaml` keeps both published ports on `127.0.0.1`
+  and expects unique dev signing/proxy secrets before startup
+- The Helm chart requires install-specific dev auth secrets instead of shipping
+  repository-known signing or proxy defaults
 
 ### CORS
 - Restricted to explicit frontend origins from `ALLOW_ORIGIN`
@@ -57,6 +74,9 @@ targets an **Authenticated Access by Default** model.
 ### Input Sanitization
 - All inputs validated via Pydantic models
 - Path traversal prevention in file operations
+- Asset upload filenames are reduced to a single metadata-safe basename before
+  storage writes so traversal segments, control characters, and Markdown heading
+  prefixes cannot escape or spoof a space's `assets/` directory metadata
 - SQL injection not applicable (no SQL database)
 
 ## Software Supply Chain Security
@@ -101,6 +121,10 @@ space-scoped and uses the following profile:
 | OAuth2 (optional link) | External identity linking and optional auto-provisioning |
 | One-time Invite Token | First-time bootstrap enrollment for admin-distributed invites |
 | Service Account API Key | Non-interactive automation with scoped least-privilege actions |
+
+- CLI server-backed endpoints MUST use `https://` for non-loopback hosts.
+  Cleartext `http://` remains acceptable only for loopback local-development
+  endpoints such as `http://localhost:8000`.
 
 ### Identity Source
 

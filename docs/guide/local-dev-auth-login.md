@@ -12,24 +12,26 @@ session. The browser and CLI must sign in explicitly after startup, so local
 development follows the same mental model as production: authenticate first,
 receive a bearer token second.
 
-The default path remains `passkey-totp`, and you can opt into `mock-oauth`
-when you want to exercise an explicit OAuth-style login flow. In every case,
-the browser and CLI must sign in explicitly after startup.
+The default path remains `passkey-totp`, and you can opt into the local demo
+login path (`mock-oauth`) when you want an explicit browser/CLI sign-in flow
+without an external provider. In every case, the browser and CLI must sign in
+explicitly after startup.
 
 That default intentionally differs from the published
-[`docker-compose.release.yaml` quick start](container-quickstart.md), which
-uses `mock-oauth` so newcomers can evaluate the browser flow faster. Source
-development keeps `passkey-totp` on by default so contributors exercise the
-explicit passkey + 2FA login path that `mise run dev` wires through
-`scripts/dev-auth-env.sh`. If you want source development to mirror the release
-quick start instead, set `UGOITE_DEV_AUTH_MODE=mock-oauth` before startup.
+[`docker-compose.release.yaml` quick start](container-quickstart.md), whose
+example flow explicitly opts into the local demo login mode (`mock-oauth`) with
+install-specific secrets so newcomers can evaluate the browser flow faster.
+Source development keeps `passkey-totp` on by default so contributors exercise
+the explicit passkey + 2FA login path that `mise run dev` wires through
+`scripts/dev-auth-env.sh`. If you want source development to mirror that demo
+flow instead, set `UGOITE_DEV_AUTH_MODE=mock-oauth` before startup.
 
 ## 1) Canonical auth mode reference
 
 | Mode | How to enable | What it does |
 |---|---|---|
 | `passkey-totp` (default) | `mise run dev` | Prompts for a local admin username and validates a current 2FA code in the terminal, then creates a passkey-bound local context that browser/CLI login requests must present alongside the 2FA step. |
-| `mock-oauth` | `UGOITE_DEV_AUTH_MODE=mock-oauth mise run dev` | Keeps startup unauthenticated, but exposes an explicit mock OAuth browser/CLI login path after the stack is running as the configured local admin user. |
+| `mock-oauth` | `UGOITE_DEV_AUTH_MODE=mock-oauth mise run dev` | Keeps startup unauthenticated, but exposes an explicit local demo browser/CLI login path after the stack is running as the configured local admin user. No external OAuth provider is used. |
 
 Each backend/frontend dev process logs the active mode at startup, for example:
 
@@ -92,14 +94,15 @@ The helper validates that code against `UGOITE_DEV_2FA_SECRET`, then stores the
 resulting **login context** in `~/.ugoite/dev-auth.json` with owner-only
 permissions (`0600`). The file contains the selected mode, username, signing
 material, and a reusable `UGOITE_DEV_PASSKEY_CONTEXT` value. The frontend proxy
-and CLI forward that passkey-bound local context automatically during
+and CLI forward that passkey-bound local context automatically for loopback
 `passkey-totp` login requests. The file does **not** store an authenticated
 bearer token and it does **not** start the app already logged in.
 
 At backend startup, that configured user is also bootstrapped into the reserved
 `admin-space`. Only active admins of `admin-space` can create additional spaces,
 and each new space still makes its creator the initial admin for that
-space.
+space. For the operator model behind that rule, read
+[Admin-space Operations](admin-space-operations.md).
 
 Force a fresh prompt:
 
@@ -138,10 +141,17 @@ oathtool --totp -b "${UGOITE_DEV_2FA_SECRET:-JBSWY3DPEHPK3PXP}"
 The browser receives a signed bearer token only **after** the login form is
 submitted successfully. The frontend proxy attaches the local
 `UGOITE_DEV_PASSKEY_CONTEXT` automatically, then stores the resulting bearer
-token in a local session cookie for `/api/*`, so protected pages can render
-normally after login.
+token in an HttpOnly local session cookie for `/api/*` so frontend JavaScript
+never reads the raw token and protected pages can render normally after login.
+Repeated invalid passkey + 2FA submissions temporarily return `429 Too Many Requests`
+with a `Retry-After` header so the local login surface cannot be hammered indefinitely.
 That login also grants the configured user access to the reserved
 `admin-space`, which is what authorizes space creation in local development.
+
+Once `/spaces` loads, continue to
+[Browser Walkthrough: First Space, Form, and Entry](browser-first-entry.md) for
+the concrete post-login path from the first space to the first form-backed
+entry.
 
 ## 6) CLI login (`passkey-totp`)
 
@@ -160,14 +170,40 @@ cargo run -q -p ugoite-cli -- auth login --username dev-local-user --totp-code 1
 If you installed the published CLI, run the equivalent `ugoite auth login`
 command with the same flags.
 
-The command prints an `export UGOITE_AUTH_BEARER_TOKEN=...` line for the current
-shell. That token is minted only after the backend validates the username + 2FA
-input together with the local `UGOITE_DEV_PASSKEY_CONTEXT`, and the
-authenticated admin user can then create additional spaces.
+The command saves a CLI session so later `ugoite` commands stay authenticated
+without extra shell setup, and it also prints shell-ready environment commands
+for the current shell. By default it emits a POSIX
+`export UGOITE_AUTH_BEARER_TOKEN=...` line. Use `--shell fish` or
+`--shell powershell` when you want shell-native output instead:
 
-## 7) Mock OAuth mode
+```fish
+cargo run -q -p ugoite-cli -- auth login --shell fish --username dev-local-user --totp-code 123456 | source
+```
 
-Use `mock-oauth` when you want an explicit OAuth-style login path without
+```powershell
+cargo run -q -p ugoite-cli -- auth login --shell powershell --username dev-local-user --totp-code 123456 | Invoke-Expression
+cargo run -q -p ugoite-cli -- auth token-clear --shell powershell | Invoke-Expression
+```
+
+Use the matching `--shell` value with `ugoite auth token-clear` or `ugoite auth
+logout` when you want to clear the session later. The token is minted only after
+the backend validates the username + 2FA input together with the local
+`UGOITE_DEV_PASSKEY_CONTEXT`, and the authenticated admin user can then create
+additional spaces.
+Repeated invalid login attempts hit the same temporary `429 Too Many Requests`
+throttle the browser flow uses.
+
+If you run the CLI from a fresh shell after `mise run dev`, it first checks the
+current `UGOITE_DEV_PASSKEY_CONTEXT` export and then falls back to the cached
+local dev auth file at `~/.ugoite/dev-auth.json` (or `UGOITE_DEV_AUTH_FILE` when
+you override it). If that cache is missing or stale, rerun
+`eval "$(bash scripts/dev-auth-env.sh)"` from the repo root before
+`ugoite auth login` so the current shell sees the same passkey-bound local
+context as the running backend.
+
+## 7) Local demo login (`mock-oauth`) mode
+
+Use `mock-oauth` when you want the explicit local demo login path without
 pre-authenticating the stack at startup.
 
 ```bash
@@ -178,7 +214,7 @@ mise run dev
 Browser flow:
 
 1. open `http://localhost:3000/login`
-2. click **Continue with Mock OAuth**
+2. click **Continue with Local Demo Login**
 
 CLI flow:
 
@@ -190,7 +226,7 @@ cargo run -q -p ugoite-cli -- auth login --mock-oauth
 ## 8) Verify auth locally
 
 1. Open `http://localhost:3000/login`.
-2. Complete either the passkey-bound username + 2FA form or the mock OAuth button.
+2. Complete either the passkey-bound username + 2FA form or the local demo login button.
 3. Confirm protected pages such as `/spaces` load successfully.
 4. Check backend health (`/health` is intentionally unauthenticated):
 
@@ -199,6 +235,10 @@ curl -i http://localhost:8000/health
 ```
 
 Expected response: `HTTP/1.1 200 OK` with body `{"status":"ok"}`.
+
+After that verification, move to
+[Browser Walkthrough: First Space, Form, and Entry](browser-first-entry.md) so
+the next steps stay action-oriented instead of scattered across multiple guides.
 
 ## 9) Start one service at a time
 

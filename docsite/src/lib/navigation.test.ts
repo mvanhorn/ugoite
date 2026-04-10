@@ -9,8 +9,8 @@ const specDataMocks = vi.hoisted(() => ({
 vi.mock("./spec-data", () => specDataMocks);
 
 import {
-	getNewcomerNavSections,
 	getNavSectionsWithChildren,
+	getNewcomerNavSections,
 	navSections,
 	titleFromSegment,
 	topLinks,
@@ -127,11 +127,23 @@ test("REQ-E2E-006: navigation helpers tolerate missing child anchors without mut
 	expect(specDataMocks.getUiPages).toHaveBeenCalledTimes(1);
 });
 
+test("REQ-E2E-006: application navigation keeps MCP as a first-class docsite route", () => {
+	const applicationSection = navSections.find(
+		(section) => section.title === "Application",
+	);
+
+	expect(applicationSection?.items.map((item) => item.href)).toContain(
+		"/app/mcp",
+	);
+	expect(applicationSection?.items.map((item) => item.title)).toContain("MCP");
+});
+
 test("REQ-E2E-008: newcomer navigation limits deep sections to getting-started content", () => {
 	expect(getNewcomerNavSections()).toEqual([
 		{
 			title: "Getting Started",
 			overviewHref: "/getting-started",
+			expandAll: true,
 			items: [
 				{ title: "Overview", href: "/getting-started" },
 				{
@@ -143,8 +155,50 @@ test("REQ-E2E-008: newcomer navigation limits deep sections to getting-started c
 					href: "/docs/guide/container-quickstart",
 				},
 				{ title: "Run from source", href: "/docs/guide/local-dev-auth-login" },
+				{
+					title: "Browser Walkthrough",
+					href: "/docs/guide/browser-first-entry",
+				},
 				{ title: "CLI Guide", href: "/docs/guide/cli" },
 				{ title: "Auth Overview", href: "/docs/guide/auth-overview" },
+				{
+					title: "Operations & Troubleshooting",
+					href: "/docs/guide/operations",
+					items: [
+						{
+							title: "Backend Healthcheck",
+							href: "/docs/guide/backend-healthcheck",
+						},
+						{
+							title: "Environment Matrix",
+							href: "/docs/guide/env-matrix",
+						},
+						{
+							title: "Helm Chart",
+							href: "/docs/guide/helm-chart",
+						},
+						{
+							title: "Log Redaction",
+							href: "/docs/guide/log-redaction",
+						},
+						{
+							title: "Space Settings & Storage",
+							href: "/docs/guide/space-settings-storage",
+						},
+						{
+							title: "Storage Cleanup",
+							href: "/docs/guide/storage-cleanup",
+						},
+						{
+							title: "Storage Migration",
+							href: "/docs/guide/storage-migration",
+						},
+						{
+							title: "Unauthorized Spaces Troubleshooting",
+							href: "/docs/guide/troubleshooting-unauthorized-spaces",
+						},
+					],
+				},
 			],
 		},
 	]);

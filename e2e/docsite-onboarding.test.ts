@@ -43,9 +43,10 @@ test.describe("Docsite onboarding-first navigation", () => {
 			"Use the CLI",
 		]);
 		await expect(page.locator("#next-steps a h3")).toHaveText([
-			"Explore the browser app",
+			"Create your first space, form, and entry",
 			"Understand auth and access",
 			"Read design and source docs",
+			"Run and troubleshoot the stack",
 		]);
 
 		const getStartedLink = page.getByRole("link", { name: "Get Started" });
@@ -64,9 +65,10 @@ test.describe("Docsite onboarding-first navigation", () => {
 			"Use the CLI",
 		]);
 		await expect(page.locator("#next .doc-card h3")).toHaveText([
-			"Explore the browser app",
+			"Create your first space, form, and entry",
 			"Understand auth and access",
 			"Read design and source docs",
+			"Run and troubleshoot the stack",
 		]);
 	});
 
@@ -96,6 +98,30 @@ test.describe("Docsite onboarding-first navigation", () => {
 		await expect(page.getByText("Application Docs")).toBeVisible();
 	});
 
+	test("REQ-E2E-008: landing and getting-started pages keep path choices ahead of the concepts primer", async ({
+		page,
+	}) => {
+		await page.goto(buildDocsiteUrl("/"), { waitUntil: "networkidle" });
+
+		const homeSectionOrder = await page
+			.locator(".doc-page-stack > section[id]")
+			.evaluateAll((sections) => sections.map((section) => section.id));
+		expect(homeSectionOrder.indexOf("start-paths")).toBeLessThan(
+			homeSectionOrder.indexOf("concept-primer"),
+		);
+
+		await page.goto(buildDocsiteUrl("/getting-started"), {
+			waitUntil: "networkidle",
+		});
+
+		const gettingStartedSectionOrder = await page
+			.locator(".doc-page-stack > section[id]")
+			.evaluateAll((sections) => sections.map((section) => section.id));
+		expect(gettingStartedSectionOrder.indexOf("first-steps")).toBeLessThan(
+			gettingStartedSectionOrder.indexOf("concepts"),
+		);
+	});
+
 	test("REQ-E2E-008: desktop navigation prioritizes getting-started content before design docs", async ({
 		page,
 	}) => {
@@ -117,8 +143,10 @@ test.describe("Docsite onboarding-first navigation", () => {
 			"Core Concepts",
 			"Container Quickstart",
 			"Run from source",
+			"Browser Walkthrough",
 			"CLI Guide",
 			"Auth Overview",
+			"Operations & Troubleshooting",
 		]);
 		await expect(
 			page.locator(".site-nav-menu").nth(2).locator(".site-nav-submenu a"),

@@ -1,4 +1,7 @@
-FROM python:3.14.3-slim-trixie@sha256:fb83750094b46fd6b8adaa80f66e2302ecbe45d513f6cece637a841e1025b4ca
+FROM python:3.14.4-slim-trixie@sha256:13c5640e79ce15c280f6a3d63c6e17d14420d26821e406c211a7cc332e9782b2
+
+ARG UGOITE_UID=10001
+ARG UGOITE_GID=10001
 
 WORKDIR /app
 # Install uv
@@ -10,10 +13,13 @@ RUN apt-get update \
 		build-essential \
 		pkg-config \
 		libssl-dev \
+		libffi-dev \
 		curl \
 		ca-certificates \
 	&& rm -rf /var/lib/apt/lists/* \
-	&& curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.88.0
+	&& curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.88.0 \
+	&& groupadd --system --gid "${UGOITE_GID}" ugoite \
+	&& useradd --system --uid "${UGOITE_UID}" --gid "${UGOITE_GID}" --create-home --home-dir /home/ugoite ugoite
 
 ENV PATH="/root/.cargo/bin:${PATH}"
 
@@ -31,8 +37,13 @@ COPY ./src src
 ENV UV_LINK_MODE=copy
 ENV PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
 # Install backend dependencies
-RUN uv sync --locked
+RUN uv sync --locked \
+	&& mkdir -p /data \
+	&& chown -R ugoite:ugoite /app /data /home/ugoite /ugoite-core /ugoite-minimum /ugoite-cli
 
 # Set the entrypoint for the backend application
+ENV HOME=/home/ugoite
+ENV PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 ENV PYTHONPATH=/app/src
-CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+USER ugoite:ugoite
+CMD ["uv", "run", "--no-sync", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

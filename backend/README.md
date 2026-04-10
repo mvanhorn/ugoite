@@ -92,7 +92,9 @@ async def update_entry_endpoint(payload: EntryUpdate):
 ### Prerequisites
 
 - Python 3.13+
-- uv (package manager)
+- For contributor-managed tool versions, use the repository root `mise.toml`
+  via `mise run setup`; backend-local commands below assume that shared Python
+  + `uv` toolchain.
 
 ### Installation
 
@@ -103,19 +105,32 @@ uv sync --locked
 
 ### Development
 
+For the canonical auth-aware contributor workflow that starts backend,
+frontend, and docsite together, return to the repository root and run
+`mise run dev` as described in the main [README](../README.md#setup--development-mise).
+
+Use the command below only when you intentionally want backend-isolated
+iteration:
+
 ```bash
-# Start development server
-uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+# Start the backend-only dev server
+mise run //backend:dev
 ```
 
 ### Testing
 
 ```bash
-# Run all tests
-uv run pytest
+# Run the full backend suite with the default coverage gate
+mise run test
 
-# Run with coverage
-uv run pytest --cov=app --cov-report=html
+# Skip the rebuild when ugoite-core is already up to date
+mise run test:no-build
+
+# Run a focused file without the global coverage gate
+mise run test:targeted:no-build -- tests/test_config.py -q
+
+# Raw pytest equivalent when you need full CLI control
+uv run pytest --no-cov tests/test_config.py -q
 ```
 
 ### Linting

@@ -15,6 +15,7 @@ from app.core.config import get_root_path
 from app.core.ids import validate_id
 from app.core.storage import space_uri, storage_config_from_root
 from app.models.payloads import (
+    MEMBERSHIP_MANAGED_SPACE_SETTING_KEYS,
     SpaceConnectionRequest,
     SpaceCreate,
     SpacePatch,
@@ -43,9 +44,10 @@ async def _ensure_space_exists(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Space not found: {space_id}",
             ) from exc
+        logger.warning("Failed to load space %s: %s", space_id, exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=msg,
+            detail="Failed to load space",
         ) from exc
 
 
@@ -119,8 +121,25 @@ def _validate_path_id(identifier: str, name: str) -> None:
     except ValueError as exc:  # pragma: no cover - exercised via API tests
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
+            detail=f"Invalid {name}",
         ) from exc
+
+
+def _validate_patch_settings(settings: dict[str, Any] | None) -> None:
+    """Reject membership lifecycle mutations from the generic patch endpoint."""
+    if settings is None:
+        return
+
+    reserved_keys = sorted(MEMBERSHIP_MANAGED_SPACE_SETTING_KEYS.intersection(settings))
+    if reserved_keys:
+        joined = ", ".join(reserved_keys)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                "settings must not include membership-managed keys "
+                f"({joined}); use the dedicated member endpoints instead"
+            ),
+        )
 
 
 def _space_uri(space_id: str) -> str:
@@ -139,19 +158,49 @@ def _reserved_admin_space_error(space_id: str) -> HTTPException:
     )
 
 
+def _is_admin_space(space_id: str) -> bool:
+    """Return whether a space id refers to the reserved admin space."""
+    return space_id == ugoite_core.admin_space_id()
+
+
+def _space_sort_key(space_meta: dict[str, Any]) -> tuple[int, str, str]:
+    """Sort user-facing spaces with default first and admin-space last."""
+    raw_space_id = space_meta.get("id")
+    space_id = raw_space_id if isinstance(raw_space_id, str) else ""
+    raw_name = space_meta.get("name")
+    name = raw_name if isinstance(raw_name, str) else space_id
+    if space_id == "default":
+        priority = 0
+    elif _is_admin_space(space_id):
+        priority = 2
+    else:
+        priority = 1
+    return (priority, name.casefold(), space_id.casefold())
+
+
+def _space_exists_conflict_error(space_id: str) -> HTTPException:
+    """Return a stable create-space conflict error without storage internals."""
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=f"Space already exists: {space_id}",
+    )
+
+
 def _sanitize_space_meta(space_meta: dict[str, Any]) -> dict[str, Any]:
     """Redact sensitive membership secrets before API response serialization."""
     sanitized = dict(space_meta)
     sanitized.pop("hmac_key", None)
     settings_obj = sanitized.get("settings")
-    if not isinstance(settings_obj, dict):
-        return sanitized
-
-    settings = dict(settings_obj)
-    settings.pop("hmac_key", None)
-    if "invitations" in settings:
-        settings["invitations"] = {}
-    sanitized["settings"] = settings
+    if isinstance(settings_obj, dict):
+        settings = dict(settings_obj)
+        settings.pop("hmac_key", None)
+        if "invitations" in settings:
+            settings["invitations"] = {}
+        sanitized["settings"] = settings
+    space_id = sanitized.get("id")
+    sanitized["is_admin_space"] = isinstance(space_id, str) and _is_admin_space(
+        space_id,
+    )
     return sanitized
 
 
@@ -172,7 +221,7 @@ async def list_spaces_endpoint(request: Request) -> list[dict[str, Any]]:
         logger.exception("Failed to list spaces")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(exc),
+            detail="Failed to list spaces",
         ) from exc
 
     results: list[dict[str, Any]] = []
@@ -195,7 +244,7 @@ async def list_spaces_endpoint(request: Request) -> list[dict[str, Any]]:
                 detail="Failed to read space metadata",
             ) from exc
 
-    return results
+    return sorted(results, key=_space_sort_key)
 
 
 @router.post("/spaces", status_code=status.HTTP_201_CREATED)
@@ -225,19 +274,17 @@ async def create_space_endpoint(
         raise
     except RuntimeError as e:
         if "already exists" in str(e).lower():
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=str(e),
-            ) from e
+            raise _space_exists_conflict_error(space_id) from e
+        logger.warning("Failed to create space %s: %s", space_id, e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to create space",
         ) from e
     except Exception as e:
         logger.exception("Failed to create space")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to create space",
         ) from e
 
     return {
@@ -268,17 +315,18 @@ async def get_space_endpoint(space_id: str, request: Request) -> dict[str, Any]:
         if "not found" in str(e).lower():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=str(e),
+                detail=f"Space not found: {space_id}",
             ) from e
+        logger.warning("Failed to get space %s: %s", space_id, e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to load space",
         ) from e
     except Exception as e:
         logger.exception("Failed to get space")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to load space",
         ) from e
 
 
@@ -309,29 +357,33 @@ async def patch_space_endpoint(
             identity,
             "space_admin",
         )
+        _validate_patch_settings(payload.settings)
         updated_space = await ugoite_core.patch_space(
             storage_config,
             space_id,
             json.dumps(patch_data),
         )
         return _sanitize_space_meta(updated_space)
+    except HTTPException:
+        raise
     except ugoite_core.AuthorizationError as exc:
         raise_authorization_http_error(exc, space_id=space_id)
     except RuntimeError as e:
         if "not found" in str(e).lower():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=str(e),
+                detail=f"Space not found: {space_id}",
             ) from e
+        logger.warning("Failed to update space %s: %s", space_id, e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to update space",
         ) from e
     except Exception as e:
         logger.exception("Failed to patch space")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to update space",
         ) from e
 
 
